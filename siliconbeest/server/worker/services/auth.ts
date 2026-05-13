@@ -16,10 +16,33 @@ import type { AccountRow, UserRow } from '../types/db';
 // Input schemas
 // ----------------------------------------------------------------
 
+/**
+ * Usernames reserved for internal use (instance actor, system routes).
+ * Compared lowercased. `__instance__` is the special identifier our actor
+ * dispatcher routes to `buildInstanceActor` — registering it would shadow
+ * the instance actor at `/users/__instance__`.
+ */
+const RESERVED_USERNAMES = new Set<string>([
+	'__instance__',
+	'actor',
+	'inbox',
+	'outbox',
+	'nodeinfo',
+	'system',
+]);
+
 export const RegisterInput = v.object({
 	email: v.pipe(v.string(), v.email()),
 	password: v.pipe(v.string(), v.minLength(8)),
-	username: v.pipe(v.string(), v.regex(/^[a-zA-Z0-9_]+$/), v.maxLength(30)),
+	username: v.pipe(
+		v.string(),
+		v.regex(/^[a-zA-Z0-9_]+$/),
+		v.maxLength(30),
+		v.check(
+			(name) => !RESERVED_USERNAMES.has(name.toLowerCase()),
+			'Username is reserved',
+		),
+	),
 });
 
 // ----------------------------------------------------------------

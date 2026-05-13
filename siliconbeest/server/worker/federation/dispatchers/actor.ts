@@ -350,7 +350,13 @@ async function buildInstanceActor(
     return null;
   }
 
-  const actorId = `https://${domain}/actor`;
+  // The instance actor's `id` MUST equal Fedify's route URL
+  // (`/users/__instance__`) so that the keyId Fedify generates for outbound
+  // signatures (`${actorUri}#main-key`) matches the `publicKey.id` we serve.
+  // The legacy `/actor` Hono endpoint keeps serving its own self-consistent
+  // actor doc (with `id: /actor`) so existing relay subscriptions that point
+  // there continue to verify successfully; same private key, different keyId.
+  const actorId = `https://${domain}/users/__instance__`;
   const rsaPubCryptoKey = await importRsaPublicKey(actorKey.public_key);
 
   let assertionMethod: Multikey | undefined;

@@ -19,7 +19,7 @@
 
 import { isDomainBlocked, extractDomain } from '../domain-blocks';
 import { buildActivityFromJsonLd } from './normalize';
-import { pickSignerUsername } from '../services/signer';
+import { pickSignerForRemote } from '../services/signer';
 import { env } from 'cloudflare:workers';
 
 // ============================================================
@@ -38,6 +38,9 @@ interface InboxListenerBuilder<TData> {
 	onError(handler: (ctx: any, error: Error) => void): void;
 	setSharedKeyDispatcher(
 		dispatcher: (ctx: any) => { identifier: string } | { username: string } | null | Promise<{ identifier: string } | { username: string } | null>,
+	): InboxListenerBuilder<TData>;
+	onUnverifiedActivity(
+		handler: (ctx: any, activity: any, reason: any) => Response | undefined | void | Promise<Response | undefined | void>,
 	): InboxListenerBuilder<TData>;
 }
 
@@ -214,14 +217,14 @@ export function setupInboxListeners<TData>(
 		// doc declares `id: /actor` while Fedify's route is
 		// `/users/__instance__`, producing a keyId/publicKey.id mismatch
 		// that authorized-fetch servers reject during verification.
-		.setSharedKeyDispatcher(async () => {
-			const username = await pickSignerUsername(env.DB, null);
-			if (!username) {
-				console.warn('[setSharedKeyDispatcher] No local signer found (no active local account with actor_keys row) — Fedify will fall back to unauthenticated documentLoader.');
-				return null;
-			}
-			console.log(`[setSharedKeyDispatcher] Returning identifier: ${username}`);
-			return { identifier: username };
+		.setSharedKeyDispatcher(() => {
+			// Shared inbox has no per-request recipient. Sign instance-wide
+			// fetches (e.g., the keyId GET during inbound HTTP Signature
+			// verification) with the instance actor's key. The instance
+			// actor's `id` and `publicKey.id` are kept consistent with
+			// Fedify's route (`/users/__instance__`) — see
+			// `buildInstanceActor` and the `__instance__` row in actor_keys.
+			return { identifier: '__instance__' };
 		})
 
 		.on(
@@ -343,6 +346,38 @@ export function setupInboxListeners<TData>(
 			),
 		)
 
+		.onUnverifiedActivity(async (_ctx: any, _activity: any, reason: any) => {
+			// Diagnostic logging for signature-verification failures.
+			// Captures the body of the response that failed the keyId fetch
+			// so authorized-fetch / blocking decisions can be debugged.
+			try {
+				const type = reason?.type;
+				const keyId = reason?.keyId?.href ?? reason?.result?.keyId?.href;
+				if (type === 'keyFetchError') {
+					const result = reason.result;
+					if (result && 'status' in result && result.response) {
+						let bodyPreview = '';
+						try {
+							bodyPreview = (await result.response.clone().text()).slice(0, 1024);
+						} catch (bodyErr) {
+							bodyPreview = `<failed to read body: ${bodyErr instanceof Error ? bodyErr.message : String(bodyErr)}>`;
+						}
+						console.warn(
+							`[inbox] keyFetchError keyId=${keyId} status=${result.status} body=${JSON.stringify(bodyPreview)}`,
+						);
+					} else if (result && 'error' in result) {
+						console.warn(`[inbox] keyFetchError keyId=${keyId} error=${result.error?.message ?? result.error}`);
+					} else {
+						console.warn(`[inbox] keyFetchError keyId=${keyId} (no result detail)`);
+					}
+				} else {
+					console.warn(`[inbox] unverified activity reason=${type} keyId=${keyId ?? 'n/a'}`);
+				}
+			} catch (logErr) {
+				console.warn('[inbox] onUnverifiedActivity log failed:', logErr);
+			}
+			return undefined; // let Fedify return its default failed-signature response
+		})
 		.onError((_ctx: any, error: Error) => {
 			console.error('[inbox] Error processing activity:', error);
 			console.error(
