@@ -254,7 +254,10 @@ export function setupActorDispatcher(fed: Federation<FedifyContextData>): void {
         )
           .bind(identifier)
           .first<{ id: string }>();
-        if (!account) return [];
+        if (!account) {
+          console.warn(`[keyPairsDispatcher] No local account for identifier='${identifier}' — returning empty keyPairs (Fedify will fall back to unauthenticated loader)`);
+          return [];
+        }
         accountId = account.id;
       }
 
@@ -264,7 +267,10 @@ export function setupActorDispatcher(fed: Federation<FedifyContextData>): void {
         .bind(accountId)
         .first<ActorKeyRow>();
 
-      if (!actorKey) return [];
+      if (!actorKey) {
+        console.warn(`[keyPairsDispatcher] No actor_keys row for account_id='${accountId}' (identifier='${identifier}') — returning empty keyPairs`);
+        return [];
+      }
 
       const keyPairs: CryptoKeyPair[] = [];
 

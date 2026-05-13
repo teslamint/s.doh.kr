@@ -31,10 +31,19 @@ export async function pickSignerUsername(
 	db: D1Database,
 	preferredAccountId: string | null,
 ): Promise<string | null> {
+	// Only consider local accounts that actually have an actor_keys row —
+	// otherwise Fedify's `getRsaKeyPairFromIdentifier` returns null and
+	// silently falls back to the unauthenticated documentLoader
+	// (middleware-huKeo4t5.js:3989), producing 401 from authorized-fetch
+	// remote servers.
 	if (preferredAccountId) {
 		const row = await db
 			.prepare(
-				"SELECT username FROM accounts WHERE id = ?1 AND domain IS NULL AND suspended_at IS NULL LIMIT 1",
+				`SELECT a.username
+				 FROM accounts a
+				 JOIN actor_keys k ON k.account_id = a.id
+				 WHERE a.id = ?1 AND a.domain IS NULL AND a.suspended_at IS NULL
+				 LIMIT 1`,
 			)
 			.bind(preferredAccountId)
 			.first<{ username: string }>();
@@ -43,7 +52,12 @@ export async function pickSignerUsername(
 
 	const fallback = await db
 		.prepare(
-			"SELECT username FROM accounts WHERE domain IS NULL AND suspended_at IS NULL ORDER BY created_at ASC LIMIT 1",
+			`SELECT a.username
+			 FROM accounts a
+			 JOIN actor_keys k ON k.account_id = a.id
+			 WHERE a.domain IS NULL AND a.suspended_at IS NULL
+			 ORDER BY a.created_at ASC
+			 LIMIT 1`,
 		)
 		.first<{ username: string }>();
 	return fallback?.username ?? null;

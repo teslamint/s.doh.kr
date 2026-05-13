@@ -216,7 +216,12 @@ export function setupInboxListeners<TData>(
 		// that authorized-fetch servers reject during verification.
 		.setSharedKeyDispatcher(async () => {
 			const username = await pickSignerUsername(env.DB, null);
-			return username ? { identifier: username } : null;
+			if (!username) {
+				console.warn('[setSharedKeyDispatcher] No local signer found (no active local account with actor_keys row) — Fedify will fall back to unauthenticated documentLoader.');
+				return null;
+			}
+			console.log(`[setSharedKeyDispatcher] Returning identifier: ${username}`);
+			return { identifier: username };
 		})
 
 		.on(
