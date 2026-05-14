@@ -365,11 +365,11 @@ app.route('/proxy', proxyEndpoint);
 // Thumbnail / favicon
 // ---------------------------------------------------------------------------
 
-// Default brand image bundled at /siliconbeest.jpg in the SPA assets.
+// Default brand image bundled at /siliconbeest.png in the SPA assets.
 // Used as the fallback when an admin hasn't uploaded a favicon/thumbnail.
 async function fetchBundledDefaultLogo(reqUrl: string): Promise<Response | null> {
   try {
-    const assetReq = new Request(new URL('/siliconbeest.jpg', reqUrl));
+    const assetReq = new Request(new URL('/siliconbeest.png', reqUrl));
     const res = await env.ASSETS.fetch(assetReq);
     if (res.ok) {
       return new Response(res.body, {

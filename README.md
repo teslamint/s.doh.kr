@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="siliconbeest/public/siliconbeest.jpg" alt="SiliconBeest logo" width="200" />
+  <img src="siliconbeest/public/siliconbeest.png" alt="SiliconBeest logo" width="200" />
 </p>
 
 # SiliconBeest
