@@ -1,0 +1,19 @@
+{
+	"name": "siliconbeest-email-sender",
+	"version": "0.0.0",
+	"private": true,
+	"scripts": {
+		"deploy": "pnpm wrangler deploy",
+		"dev": "pnpm wrangler dev",
+		"start": "pnpm wrangler dev",
+		"cf-typegen": "pnpm wrangler types"
+	},
+	"devDependencies": {
+		"@types/node": "^25.5.0",
+		"typescript": "^5.5.2",
+		"wrangler": "^4.80.0"
+	},
+	"dependencies": {
+		"worker-mailer": "^1.2.1"
+	}
+}

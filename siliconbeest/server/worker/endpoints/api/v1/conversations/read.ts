@@ -1,0 +1,25 @@
+import { Hono } from 'hono';
+import type { AppVariables } from '../../../../types';
+import { authRequired } from '../../../../middleware/auth';
+import { markConversationRead } from '../../../../services/conversation';
+
+type HonoEnv = { Variables: AppVariables };
+
+const app = new Hono<HonoEnv>();
+
+// POST /api/v1/conversations/:id/read — mark as read
+app.post('/:id/read', authRequired, async (c) => {
+  const currentAccount = c.get('currentAccount')!;
+  const conversationId = c.req.param('id');
+
+  await markConversationRead(conversationId, currentAccount.id);
+
+  return c.json({
+    id: conversationId,
+    accounts: [],
+    last_status: null,
+    unread: false,
+  });
+});
+
+export default app;

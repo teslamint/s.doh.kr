@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+/* Enable class-based dark mode (toggleable via JS adding .dark to <html>) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Base styles for dark mode */
+@layer base {
+  html {
+    color-scheme: light dark;
+  }
+
+  body {
+    @apply bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100;
+  }
+
+  /* Ensure form elements inherit text color and have visible borders */
+  input,
+  textarea,
+  select,
+  button {
+    color: inherit;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    @apply text-gray-400 dark:text-gray-500;
+  }
+
+  /* Links */
+  a {
+    @apply text-indigo-600 dark:text-indigo-400;
+  }
+
+  /* Mastodon-style link formatting: hide https:// prefix in federated HTML content.
+     Tailwind's .invisible uses visibility:hidden which keeps layout space.
+     We need display:none to fully remove the element from flow. */
+  .invisible {
+    display: none !important;
+  }
+
+  .ellipsis {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
