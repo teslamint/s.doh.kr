@@ -83,6 +83,10 @@ export class StreamingClient {
 
     try {
       this.ws = new WebSocket(urlString);
+      this.log('constructed', {
+        readyState: this.ws.readyState,
+        url: this.redactAccessToken(this.ws.url),
+      });
     } catch (error) {
       this.log('connect constructor failed', { error });
       this.scheduleReconnect();

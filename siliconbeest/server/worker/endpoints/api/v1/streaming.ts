@@ -24,6 +24,10 @@ import { getAuthTokenFromCookie } from '../../../utils/authCookie';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
+function debugStreaming(message: string, data?: Record<string, unknown>) {
+  console.info(`[streaming endpoint] ${message}`, data ?? {});
+}
+
 function extractBearerToken(header: string | undefined): string | null {
   if (!header) return null;
   const parts = header.split(' ');
@@ -42,9 +46,20 @@ async function resolveFirstValidToken(tokens: Array<string | null | undefined>) 
 }
 
 app.get('/', async (c) => {
+  const stream = c.req.query('stream') || 'user';
+
   // 1. Require WebSocket upgrade
   const upgradeHeader = c.req.header('Upgrade');
+  debugStreaming('request', {
+    stream,
+    upgrade: upgradeHeader ?? null,
+    hasBearer: !!extractBearerToken(c.req.header('Authorization')),
+    hasCookie: !!getAuthTokenFromCookie(c.req.header('Cookie')),
+    hasQueryToken: !!c.req.query('access_token'),
+  });
+
   if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
+    debugStreaming('rejected: missing websocket upgrade', { stream });
     return c.json({ error: 'Expected WebSocket upgrade' }, 426);
   }
 
@@ -56,11 +71,11 @@ app.get('/', async (c) => {
     c.req.query('access_token'),
   ]);
   if (!payload) {
+    debugStreaming('rejected: invalid token', { stream });
     return c.json({ error: 'The access token is invalid' }, 401);
   }
 
   const userId = payload.user.id;
-  const stream = c.req.query('stream') || 'user';
 
   // 4. Forward upgrade to the appropriate StreamingDO instance
   //    Public streams use a shared DO, user streams use per-user DOs
@@ -81,7 +96,31 @@ app.get('/', async (c) => {
   const list = c.req.query('list');
   if (list) doUrl.searchParams.set('list', list);
 
-  return doStub.fetch(new Request(doUrl.toString(), c.req.raw));
+  debugStreaming('forwarding to durable object', {
+    stream,
+    target: doName === '__public__' ? 'public' : 'user',
+  });
+
+  let response: Response;
+  try {
+    response = await doStub.fetch(doUrl.toString(), {
+      method: c.req.method,
+      headers: c.req.raw.headers,
+    });
+    debugStreaming('durable object response', {
+      stream,
+      status: response.status,
+      hasWebSocket: !!response.webSocket,
+    });
+  } catch (error) {
+    debugStreaming('durable object fetch failed', {
+      stream,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+
+  return response;
 });
 
 export default app;
