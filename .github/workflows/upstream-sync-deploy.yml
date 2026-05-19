@@ -91,9 +91,9 @@ jobs:
 
           TAG="${{ steps.decide.outputs.new_tag }}"
 
-          echo "Merging upstream/main (tag: $TAG)..."
+          echo "Merging upstream tag $TAG..."
           BEFORE=$(git rev-parse HEAD)
-          if git merge upstream/main --no-edit --allow-unrelated-histories -m "chore: sync upstream to $TAG"; then
+          if git merge "$TAG" --no-edit --allow-unrelated-histories -m "chore: sync upstream to $TAG"; then
             AFTER=$(git rev-parse HEAD)
             if [[ "$BEFORE" == "$AFTER" ]]; then
               # Merge was "Already up to date" — just update version file
