@@ -483,6 +483,8 @@ async function handleDelete() {
           :account-id="displayStatus.account.id"
           :account-acct="displayStatus.account.acct"
           :visibility="displayStatus.visibility"
+          :quote-policy-allows="displayStatus.quote_policy_allows"
+          :quote-policy-reason="displayStatus.quote_policy_reason"
           :loading-favourite="loadingFavourite"
           :loading-reblog="loadingReblog"
           :loading-bookmark="loadingBookmark"

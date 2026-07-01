@@ -26,6 +26,7 @@ const emit = defineEmits<{
     language: string
     in_reply_to_id?: string
     quote_id?: string
+    quote_policy?: import('@/types/mastodon').QuotePolicy
     media_ids?: string[]
   }]
 }>()
@@ -400,6 +401,16 @@ function initialVisibility() {
 }
 
 const selectedVisibility = ref(initialVisibility())
+const quotePolicyOptions: Array<{ value: import('@/types/mastodon').QuotePolicy; label: string }> = [
+  { value: 'public', label: 'compose.quote_policy.public' },
+  { value: 'followers', label: 'compose.quote_policy.followers' },
+  { value: 'nobody', label: 'compose.quote_policy.nobody' },
+]
+const quotePolicyIcons: Record<import('@/types/mastodon').QuotePolicy, string> = {
+  public: '↗',
+  followers: '◎',
+  nobody: '⊘',
+}
 
 const canSubmit = computed(() => {
   const hasContent = content.value.trim().length > 0 || compose.mediaAttachments.length > 0 || !!compose.quoteStatus
@@ -497,6 +508,7 @@ function submit() {
     language: selectedLanguage.value.code,
     in_reply_to_id: props.replyTo?.id,
     quote_id: compose.quoteId ?? undefined,
+    quote_policy: compose.quotePolicy,
     media_ids: compose.mediaAttachments.map(m => m.id),
   })
   content.value = ''
@@ -508,7 +520,10 @@ function submit() {
 </script>
 
 <template>
-  <form @submit.prevent="submit" class="border-b border-gray-200 dark:border-gray-700 last:border-b-0">
+  <form
+    @submit.prevent="submit"
+    class="border-b border-gray-200 dark:border-gray-700 last:border-b-0 px-4 py-3 bg-white dark:bg-gray-950"
+  >
     <!-- Hidden file input -->
     <input
       ref="fileInput"
@@ -518,6 +533,116 @@ function submit() {
       class="hidden"
       @change="onFileSelect"
     />
+
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+      <!-- Visibility selector -->
+      <Listbox v-model="selectedVisibility">
+        <div class="relative">
+          <ListboxButton
+            class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-300 dark:border-indigo-500/70 text-sm font-medium text-indigo-700 dark:text-indigo-200 bg-indigo-50/60 dark:bg-indigo-950/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+            :aria-label="t('compose.visibility.label')"
+            :title="t('compose.visibility.label')"
+          >
+            <span>{{ selectedVisibility.icon }}</span>
+            <span>{{ t(selectedVisibility.label) }}</span>
+          </ListboxButton>
+          <ListboxOptions
+            class="absolute left-0 top-full mt-1 w-56 rounded-lg bg-white dark:bg-gray-900 shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-20"
+          >
+            <ListboxOption
+              v-for="option in visibilityOptions"
+              :key="option.value"
+              v-slot="{ active, selected }"
+              :value="option"
+            >
+              <button
+                type="button"
+                class="w-full flex items-center gap-3 px-3 py-2 text-left text-sm"
+                :class="[
+                  active ? 'bg-gray-100 dark:bg-gray-800' : '',
+                  selected ? 'font-semibold text-indigo-600 dark:text-indigo-300' : 'text-gray-700 dark:text-gray-200',
+                ]"
+              >
+                <span>{{ option.icon }}</span>
+                <span>{{ t(option.label) }}</span>
+              </button>
+            </ListboxOption>
+          </ListboxOptions>
+        </div>
+      </Listbox>
+
+      <!-- Quote policy selector -->
+      <Listbox v-model="compose.quotePolicy">
+        <div class="relative">
+          <ListboxButton
+            class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-300 dark:border-indigo-500/70 text-sm font-medium text-indigo-700 dark:text-indigo-200 bg-indigo-50/60 dark:bg-indigo-950/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+            :aria-label="t('compose.quote_policy.label')"
+            :title="t('compose.quote_policy.label')"
+          >
+            <span>{{ quotePolicyIcons[compose.quotePolicy] }}</span>
+            <span>{{ t(`compose.quote_policy.${compose.quotePolicy}`) }}</span>
+          </ListboxButton>
+          <ListboxOptions
+            class="absolute left-0 top-full mt-1 z-20 w-48 rounded-lg bg-white dark:bg-gray-900 shadow-lg border border-gray-200 dark:border-gray-700 py-1"
+          >
+            <ListboxOption
+              v-for="opt in quotePolicyOptions"
+              :key="opt.value"
+              v-slot="{ active, selected }"
+              :value="opt.value"
+            >
+              <button
+                type="button"
+                class="w-full flex items-center gap-3 px-3 py-2 text-left text-sm"
+                :class="[
+                  active ? 'bg-gray-100 dark:bg-gray-800' : '',
+                  selected ? 'font-semibold text-indigo-600 dark:text-indigo-300' : 'text-gray-700 dark:text-gray-200',
+                ]"
+              >
+                <span>{{ quotePolicyIcons[opt.value] }}</span>
+                <span>{{ t(opt.label) }}</span>
+              </button>
+            </ListboxOption>
+          </ListboxOptions>
+        </div>
+      </Listbox>
+
+      <!-- Language selector -->
+      <Listbox v-model="selectedLanguage">
+        <div class="relative">
+          <ListboxButton
+            class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-300 dark:border-indigo-500/70 text-sm font-medium text-indigo-700 dark:text-indigo-200 bg-indigo-50/60 dark:bg-indigo-950/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+            :aria-label="t('compose.language')"
+            :title="t('compose.language')"
+          >
+            <span>文</span>
+            <span>{{ selectedLanguage.label }}</span>
+          </ListboxButton>
+          <ListboxOptions
+            class="absolute left-0 top-full mt-1 w-40 max-h-56 overflow-auto rounded-lg bg-white dark:bg-gray-900 shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-20"
+          >
+            <ListboxOption
+              v-for="lang in languageOptions"
+              :key="lang.code"
+              v-slot="{ active, selected }"
+              :value="lang"
+            >
+              <button
+                type="button"
+                class="w-full flex items-center gap-2 px-3 py-2 text-left text-sm"
+                :class="[
+                  active ? 'bg-gray-100 dark:bg-gray-800' : '',
+                  selected ? 'font-semibold text-indigo-600 dark:text-indigo-300' : 'text-gray-700 dark:text-gray-200',
+                ]"
+              >
+                <span class="uppercase font-mono text-xs text-gray-400 w-6">{{ lang.code }}</span>
+                <span>{{ lang.label }}</span>
+              </button>
+            </ListboxOption>
+          </ListboxOptions>
+        </div>
+      </Listbox>
+    </div>
 
     <!-- Reply indicator -->
     <div v-if="replyTo" class="text-sm text-gray-500 dark:text-gray-400 mb-2">
@@ -530,7 +655,7 @@ function submit() {
       v-model="spoilerText"
       type="text"
       :placeholder="t('compose.cw_placeholder')"
-      class="w-full mb-2 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500"
+      class="w-full mb-2 px-3 py-2 text-sm border-x-4 border-y border-amber-400 dark:border-amber-500 rounded-lg bg-amber-50 dark:bg-amber-950/30 text-gray-900 dark:text-gray-100 placeholder-amber-700/70 dark:placeholder-amber-300/70 focus:outline-none focus:ring-2 focus:ring-amber-500"
     />
 
     <!-- Main textarea with autocomplete container -->
@@ -539,8 +664,8 @@ function submit() {
         ref="textareaRef"
         v-model="content"
         :placeholder="t('compose.placeholder')"
-        rows="4"
-        class="w-full px-3 py-2 text-base bg-transparent border-0 resize-none focus:outline-none placeholder-gray-400 dark:placeholder-gray-500"
+        rows="5"
+        class="w-full px-0 py-2 text-lg leading-relaxed bg-transparent border-0 resize-none focus:outline-none placeholder-gray-400 dark:placeholder-gray-500"
         @paste="onPaste"
         @drop.prevent="onDrop"
         @dragover.prevent
@@ -733,31 +858,32 @@ function submit() {
     </div>
 
     <!-- Toolbar -->
-    <div class="flex items-center justify-between mt-3 pt-3 border-t border-gray-300 dark:border-gray-600">
+    <div class="flex items-center justify-between mt-3 pt-3 border-t border-gray-200 dark:border-gray-800">
       <div class="flex items-center gap-1.5 flex-wrap">
         <!-- Media upload -->
         <button
           type="button"
           @click="triggerFileInput"
           :disabled="compose.mediaAttachments.length >= 4 || compose.uploading || compose.showPoll"
-          class="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-lg"
+          class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-indigo-600 dark:text-indigo-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           :aria-label="t('compose.add_media')"
           :title="t('compose.add_media')"
         >
-          📎
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M4 16l4.6-4.6a2 2 0 012.8 0L16 16m-2-2l1.6-1.6a2 2 0 012.8 0L20 14m-14 6h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2zm3-11h.01" /></svg>
         </button>
 
         <!-- CW toggle -->
         <button
           type="button"
           @click="showCw = !showCw"
-          class="px-2 py-1 rounded text-xs font-semibold border transition-colors"
+          class="p-2 rounded-lg transition-colors"
           :class="showCw
-            ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
-            : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400'"
+            ? 'bg-indigo-600 text-white'
+            : 'text-indigo-600 dark:text-indigo-300 hover:bg-gray-100 dark:hover:bg-gray-800'"
           :aria-label="t('compose.toggle_cw')"
+          :title="t('compose.toggle_cw')"
         >
-          CW
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M12 9v4m0 4h.01M10.3 4.3L2.8 17.3A2 2 0 004.5 20h15a2 2 0 001.7-2.7L13.7 4.3a2 2 0 00-3.4 0z" /></svg>
         </button>
 
         <!-- Poll toggle -->
@@ -765,12 +891,12 @@ function submit() {
           type="button"
           @click="togglePoll"
           :disabled="compose.mediaAttachments.length > 0"
-          class="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors text-lg disabled:opacity-30 disabled:cursor-not-allowed"
-          :class="compose.showPoll ? 'bg-gray-200 dark:bg-gray-700 text-indigo-600 dark:text-indigo-400' : 'text-gray-600 dark:text-gray-300'"
+          class="p-2 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          :class="compose.showPoll ? 'bg-indigo-600 text-white' : 'text-indigo-600 dark:text-indigo-300 hover:bg-gray-100 dark:hover:bg-gray-800'"
           :aria-label="t('compose.poll_toggle')"
           :title="t('compose.poll_toggle')"
         >
-          📊
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M4 19V9m5 10V5m5 14v-7m5 7V8" /></svg>
         </button>
 
         <!-- Emoji picker -->
@@ -779,12 +905,12 @@ function submit() {
             type="button"
             ref="emojiButtonRef"
             @click.stop="toggleEmojiPicker"
-            class="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors text-lg"
-            :class="showEmojiPicker ? 'bg-gray-200 dark:bg-gray-700' : ''"
+            class="p-2 rounded-lg text-indigo-600 dark:text-indigo-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            :class="showEmojiPicker ? 'bg-indigo-600 text-white hover:bg-indigo-600' : ''"
             :aria-label="t('compose.emoji_picker')"
             :title="t('compose.emoji_picker')"
           >
-            😀
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M15.2 15.2a4.5 4.5 0 01-6.4 0M9 9.5h.01M15 9.5h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           </button>
           <Teleport to="body">
             <div
@@ -797,57 +923,6 @@ function submit() {
             </div>
           </Teleport>
         </div>
-
-        <!-- Visibility selector -->
-        <Listbox v-model="selectedVisibility">
-          <div class="relative">
-            <ListboxButton
-              class="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 text-lg"
-              :aria-label="t('compose.visibility.label')"
-              :title="t('compose.visibility.label')"
-            >
-              {{ selectedVisibility.icon }}
-            </ListboxButton>
-            <ListboxOptions
-              class="absolute bottom-full mb-1 w-48 rounded-lg bg-white dark:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-10"
-            >
-              <ListboxOption
-                v-for="option in visibilityOptions"
-                :key="option.value"
-                :value="option"
-                class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 text-sm"
-              >
-                <span>{{ option.icon }}</span>
-                <span>{{ t(option.label) }}</span>
-              </ListboxOption>
-            </ListboxOptions>
-          </div>
-        </Listbox>
-
-        <!-- Language selector -->
-        <Listbox v-model="selectedLanguage">
-          <div class="relative">
-            <ListboxButton
-              class="px-2 py-1 rounded text-xs font-semibold border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 uppercase"
-              :aria-label="t('compose.language')"
-            >
-              {{ selectedLanguage.code }}
-            </ListboxButton>
-            <ListboxOptions
-              class="absolute bottom-full mb-1 w-36 max-h-48 overflow-auto rounded-lg bg-white dark:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-10"
-            >
-              <ListboxOption
-                v-for="lang in languageOptions"
-                :key="lang.code"
-                :value="lang"
-                class="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 text-sm"
-              >
-                <span class="uppercase font-mono text-xs text-gray-400 w-5">{{ lang.code }}</span>
-                <span>{{ lang.label }}</span>
-              </ListboxOption>
-            </ListboxOptions>
-          </div>
-        </Listbox>
 
         <!-- Media count -->
         <span v-if="compose.mediaAttachments.length > 0" class="text-xs text-gray-400 dark:text-gray-500">

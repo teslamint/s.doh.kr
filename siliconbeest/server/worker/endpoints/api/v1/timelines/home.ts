@@ -82,6 +82,8 @@ app.get('/', authRequired, async (c) => {
         bookmarked: origE?.bookmarked,
         card: origE?.card, poll: origE?.poll,
         emojis: origE?.emojis,
+        quotePolicyAllows: origE?.quotePolicyAllows,
+        quotePolicyReason: origE?.quotePolicyReason,
       });
       reblogMap.set(rr.id as string, origSerialized);
     }
@@ -112,6 +114,8 @@ app.get('/', authRequired, async (c) => {
       card: e?.card, poll: e?.poll,
       quote: e?.quote,
       emojis: e?.emojis,
+      quotePolicyAllows: e?.quotePolicyAllows,
+      quotePolicyReason: e?.quotePolicyReason,
     });
     // Fill reblog object if this is a boost
     if (row.reblog_of_id) {

@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { generateUlid } from '../../utils/ulid';
 import type { APNote, APObject, APQuoteAuthorization } from '../../types/activitypub';
+import { normalizeQuotePolicy, quotePolicyAutomaticApproval, type QuotePolicy } from '../../../../../packages/shared/utils/quotePolicy';
 
 export const AS_PUBLIC = 'https://www.w3.org/ns/activitystreams#Public';
 export const FEP044F_QUOTE = 'https://w3id.org/fep/044f#quote';
@@ -104,12 +105,17 @@ export function addQuoteProperties(
   return jsonLd;
 }
 
-export function addDefaultQuotePolicy(jsonLd: Record<string, unknown>, actorUri: string): Record<string, unknown> {
+export function addDefaultQuotePolicy(
+  jsonLd: Record<string, unknown>,
+  actorUri: string,
+  policy: QuotePolicy = 'public',
+): Record<string, unknown> {
   ensureQuoteContext(jsonLd);
+  const normalized = normalizeQuotePolicy(policy);
   jsonLd.interactionPolicy = {
     canQuote: {
-      automaticApproval: AS_PUBLIC,
-      manualApproval: actorUri,
+      automaticApproval: quotePolicyAutomaticApproval(normalized, actorUri, `${actorUri}/followers`),
+      ...(normalized === 'nobody' ? {} : { manualApproval: actorUri }),
     },
   };
   return jsonLd;

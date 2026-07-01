@@ -25,6 +25,11 @@ export type Status = {
 	edited_at: string | null;
 	deleted_at: string | null;
 	poll_id: string | null;
+	quote_id: string | null;
+	quote_authorization_uri: string | null;
+	quote_approval_status: string | null;
+	quote_request_uri: string | null;
+	quote_policy: string | null;
 	created_at: string;
 	updated_at: string;
 };
@@ -46,6 +51,11 @@ export type CreateStatusInput = {
 	reply?: number;
 	local?: number;
 	poll_id?: string | null;
+	quote_id?: string | null;
+	quote_authorization_uri?: string | null;
+	quote_approval_status?: string | null;
+	quote_request_uri?: string | null;
+	quote_policy?: string | null;
 };
 
 export type TimelineOptions = {
@@ -132,6 +142,11 @@ export const create = async (input: CreateStatusInput): Promise<Status> => {
 		edited_at: null,
 		deleted_at: null,
 		poll_id: input.poll_id ?? null,
+		quote_id: input.quote_id ?? null,
+		quote_authorization_uri: input.quote_authorization_uri ?? null,
+		quote_approval_status: input.quote_approval_status ?? null,
+		quote_request_uri: input.quote_request_uri ?? null,
+		quote_policy: input.quote_policy ?? 'public',
 		created_at: now,
 		updated_at: now,
 	};
@@ -145,8 +160,9 @@ export const create = async (input: CreateStatusInput): Promise<Status> => {
 				sensitive, language, conversation_id, reply,
 				replies_count, reblogs_count, favourites_count,
 				local, federated_at, edited_at, deleted_at, poll_id,
+				quote_id, quote_authorization_uri, quote_approval_status, quote_request_uri, quote_policy,
 				created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.bind(
 			status.id, status.uri, status.url, status.account_id,
@@ -155,7 +171,9 @@ export const create = async (input: CreateStatusInput): Promise<Status> => {
 			status.sensitive, status.language, status.conversation_id, status.reply,
 			status.replies_count, status.reblogs_count, status.favourites_count,
 			status.local, status.federated_at, status.edited_at, status.deleted_at,
-			status.poll_id, status.created_at, status.updated_at
+			status.poll_id, status.quote_id, status.quote_authorization_uri,
+			status.quote_approval_status, status.quote_request_uri, status.quote_policy,
+			status.created_at, status.updated_at
 		)
 		.run();
 

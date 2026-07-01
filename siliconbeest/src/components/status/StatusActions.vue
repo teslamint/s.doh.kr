@@ -16,6 +16,8 @@ const props = defineProps<{
   accountId?: string
   accountAcct?: string
   visibility?: string
+  quotePolicyAllows?: boolean
+  quotePolicyReason?: string | null
   loadingReblog?: boolean
   loadingFavourite?: boolean
   loadingBookmark?: boolean
@@ -28,7 +30,16 @@ const canReblog = computed(() => {
 
 const canQuote = computed(() => {
   const v = props.visibility ?? 'public'
-  return v === 'public' || v === 'unlisted'
+  return (v === 'public' || v === 'unlisted') && props.quotePolicyAllows !== false
+})
+
+const quoteTooltip = computed(() => {
+  if (canQuote.value) return t('status.quote')
+  const reason = props.quotePolicyReason
+  if (reason === 'policy_nobody') return t('status.cannot_quote_policy_nobody')
+  if (reason === 'followers_only') return t('status.cannot_quote_followers_only')
+  if (reason === 'login_required') return t('status.cannot_quote_login_required')
+  return t('status.cannot_quote_visibility')
 })
 
 const emit = defineEmits<{
@@ -135,8 +146,8 @@ function formatCount(n: number): string {
       :class="canQuote
         ? 'text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20'
         : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'"
-      :aria-label="t('status.quote')"
-      :title="!canQuote ? t('status.cannot_quote') : t('status.quote')"
+      :aria-label="quoteTooltip"
+      :title="quoteTooltip"
     >
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 8h10M7 12h6m-7 8l-2-2V6a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H9l-3 4z" /></svg>
     </button>

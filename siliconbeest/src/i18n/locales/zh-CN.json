@@ -121,7 +121,13 @@
     "poll_multiple": "多选",
     "poll_minutes": "分钟",
     "poll_hours": "小时",
-    "poll_days": "天"
+    "poll_days": "天",
+    "quote_policy": {
+      "label": "引用政策",
+      "public": "允许所有人",
+      "followers": "仅关注者",
+      "nobody": "不允许"
+    }
   },
   "poll": {
     "vote": "投票",
@@ -218,7 +224,11 @@
     "report": "举报",
     "reblogged": "已转发",
     "cannot_boost": "此帖文无法被转发",
-    "cannot_quote": "此帖文无法被引用"
+    "cannot_quote": "此帖文无法被引用",
+    "cannot_quote_visibility": "只有公开或未列出的帖子可以被引用",
+    "cannot_quote_policy_nobody": "作者不允许引用此帖子",
+    "cannot_quote_followers_only": "只有作者的关注者可以引用此帖子",
+    "cannot_quote_login_required": "以关注者身份登录后才能引用此帖子"
   },
   "notification": {
     "title": "通知",
@@ -366,6 +376,14 @@
     "posting": "发帖",
     "posting_default_visibility": "默认帖子可见度",
     "posting_default_visibility_desc": "新帖子将默认使用此可见度。回复串帖时，可见度会被限制在上级帖子的范围内。",
+    "default_quote_policy": "默认引用政策",
+    "default_quote_policy_desc": "选择新帖默认允许谁引用。",
+    "quote_policy_public": "允许所有人",
+    "quote_policy_public_desc": "任何人都可以引用此帖子。",
+    "quote_policy_followers": "仅关注者",
+    "quote_policy_followers_desc": "只有关注你的人可以引用此帖子。",
+    "quote_policy_nobody": "不允许",
+    "quote_policy_nobody_desc": "除你之外，没有人可以引用此帖子。",
     "posting_visibility_saved": "默认可见度已保存。",
     "columns": "栏目",
     "columns_desc": "选择在宽屏幕上主页时间线旁显示的栏目。",

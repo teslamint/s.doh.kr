@@ -18,8 +18,20 @@ import {
 } from '@fedify/vocab';
 import { Temporal } from '@js-temporal/polyfill';
 import type { AccountRow, StatusRow, PollRow } from '../../../types/db';
+import { normalizeQuotePolicy, quotePolicyAutomaticApproval } from '../../../../../../packages/shared/utils/quotePolicy';
 
 export const AS_PUBLIC = 'https://www.w3.org/ns/activitystreams#Public';
+
+function buildCanQuoteRule(status: StatusRow, actorUri: string): InteractionRule {
+  const policy = normalizeQuotePolicy(status.quote_policy);
+  const values: ConstructorParameters<typeof InteractionRule>[0] = {
+    automaticApproval: new URL(quotePolicyAutomaticApproval(policy, actorUri, `${actorUri}/followers`)),
+  };
+  if (policy !== 'nobody') {
+    values.manualApproval = new URL(actorUri);
+  }
+  return new InteractionRule(values);
+}
 
 /**
  * Convert an ISO 8601 date string to a Temporal.Instant.
@@ -141,10 +153,7 @@ export function buildFedifyNote(
     sensitive: status.sensitive === 1,
     summary: status.content_warning || null,
     interactionPolicy: new InteractionPolicy({
-      canQuote: new InteractionRule({
-        automaticApproval: new URL(AS_PUBLIC),
-        manualApproval: new URL(actorUri),
-      }),
+      canQuote: buildCanQuoteRule(status, actorUri),
     }),
   };
 
@@ -239,10 +248,7 @@ export function buildFedifyQuestion(
     sensitive: status.sensitive === 1,
     summary: status.content_warning || null,
     interactionPolicy: new InteractionPolicy({
-      canQuote: new InteractionRule({
-        automaticApproval: new URL(AS_PUBLIC),
-        manualApproval: new URL(actorUri),
-      }),
+      canQuote: buildCanQuoteRule(status, actorUri),
     }),
   };
 

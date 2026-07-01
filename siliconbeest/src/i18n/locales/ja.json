@@ -121,7 +121,13 @@
     "poll_multiple": "複数選択",
     "poll_minutes": "分",
     "poll_hours": "時間",
-    "poll_days": "日"
+    "poll_days": "日",
+    "quote_policy": {
+      "label": "引用ポリシー",
+      "public": "全員に許可",
+      "followers": "フォロワーのみ",
+      "nobody": "許可しない"
+    }
   },
   "poll": {
     "vote": "投票",
@@ -218,7 +224,11 @@
     "report": "報告",
     "reblogged": "ブーストしました",
     "cannot_boost": "この投稿はブーストできません",
-    "cannot_quote": "この投稿は引用できません"
+    "cannot_quote": "この投稿は引用できません",
+    "cannot_quote_visibility": "公開または未収載の投稿のみ引用できます",
+    "cannot_quote_policy_nobody": "投稿者がこの投稿の引用を許可していません",
+    "cannot_quote_followers_only": "投稿者のフォロワーのみこの投稿を引用できます",
+    "cannot_quote_login_required": "フォロワーとしてログインすると引用できます"
   },
   "notification": {
     "title": "通知",
@@ -366,6 +376,14 @@
     "posting": "投稿",
     "posting_default_visibility": "デフォルトの公開範囲",
     "posting_default_visibility_desc": "新しい投稿はデフォルトでこの公開範囲を使用します。スレッドへの返信時は、親投稿の公開範囲以下に制限されます。",
+    "default_quote_policy": "デフォルト引用ポリシー",
+    "default_quote_policy_desc": "新しい投稿を引用できる範囲のデフォルトを選択します。",
+    "quote_policy_public": "全員に許可",
+    "quote_policy_public_desc": "誰でもこの投稿を引用できます。",
+    "quote_policy_followers": "フォロワーのみ",
+    "quote_policy_followers_desc": "あなたのフォロワーのみこの投稿を引用できます。",
+    "quote_policy_nobody": "許可しない",
+    "quote_policy_nobody_desc": "あなた以外はこの投稿を引用できません。",
     "posting_visibility_saved": "デフォルトの公開範囲を保存しました。",
     "columns": "カラム",
     "columns_desc": "ワイドスクリーンでホームタイムラインの横に表示するカラムを選択してください。",

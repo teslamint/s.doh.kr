@@ -232,6 +232,8 @@ app.get('/', authOptional, async (c) => {
         bookmarked: e?.bookmarked,
         card: e?.card, poll: e?.poll,
         emojis: e?.emojis,
+        quotePolicyAllows: e?.quotePolicyAllows,
+        quotePolicyReason: e?.quotePolicyReason,
       });
     });
   }

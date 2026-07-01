@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
-import type { StatusVisibility, MediaAttachment, Status } from '@/types/mastodon';
+import type { StatusVisibility, MediaAttachment, Status, QuotePolicy } from '@/types/mastodon';
 import { createStatus, editStatus } from '@/api/mastodon/statuses';
 import { updateCredentials } from '@/api/mastodon/accounts';
 import { uploadMedia } from '@/api/mastodon/media';
@@ -12,11 +12,15 @@ const MAX_CHARACTERS = 500;
 
 export const useComposeStore = defineStore('compose', () => {
   const defaultVisibility = ref<StatusVisibility>('public');
+  const defaultQuotePolicy = ref<QuotePolicy>('public');
 
   // Sync defaultVisibility from currentUser.source.privacy when user data loads
   const auth = useAuthStore();
   watch(() => auth.currentUser?.source?.privacy, (privacy) => {
     if (privacy) defaultVisibility.value = privacy;
+  }, { immediate: true });
+  watch(() => auth.currentUser?.source?.quote_policy, (policy) => {
+    defaultQuotePolicy.value = policy ?? 'public';
   }, { immediate: true });
   const text = ref('');
   const contentWarning = ref('');
@@ -27,6 +31,7 @@ export const useComposeStore = defineStore('compose', () => {
   const inReplyToStatus = ref<Status | null>(null);
   const quoteId = ref<string | null>(null);
   const quoteStatus = ref<Status | null>(null);
+  const quotePolicy = ref<QuotePolicy>(defaultQuotePolicy.value);
   const editingId = ref<string | null>(null);
   const mediaAttachments = ref<MediaAttachment[]>([]);
   const uploading = ref(false);
@@ -60,6 +65,7 @@ export const useComposeStore = defineStore('compose', () => {
     inReplyToStatus.value = null;
     quoteId.value = null;
     quoteStatus.value = null;
+    quotePolicy.value = defaultQuotePolicy.value;
     editingId.value = null;
     mediaAttachments.value = [];
     uploading.value = false;
@@ -76,6 +82,18 @@ export const useComposeStore = defineStore('compose', () => {
     if (auth.token) {
       const formData = new FormData();
       formData.append('source[privacy]', v);
+      await updateCredentials(auth.token, formData);
+      await auth.fetchCurrentUser();
+    }
+  }
+
+  async function setDefaultQuotePolicy(policy: QuotePolicy) {
+    defaultQuotePolicy.value = policy;
+    quotePolicy.value = policy;
+    const auth = useAuthStore();
+    if (auth.token) {
+      const formData = new FormData();
+      formData.append('source[quote_policy]', policy);
       await updateCredentials(auth.token, formData);
       await auth.fetchCurrentUser();
     }
@@ -148,6 +166,7 @@ export const useComposeStore = defineStore('compose', () => {
         visibility: visibility.value,
         language: language.value,
         quote_id: quoteId.value ?? undefined,
+        quote_policy: quotePolicy.value,
         poll:
           showPoll.value && pollOptions.value.length >= 2
             ? {
@@ -194,12 +213,15 @@ export const useComposeStore = defineStore('compose', () => {
     showContentWarning,
     visibility,
     defaultVisibility,
+    defaultQuotePolicy,
     setDefaultVisibility,
+    setDefaultQuotePolicy,
     sensitive,
     inReplyToId,
     inReplyToStatus,
     quoteId,
     quoteStatus,
+    quotePolicy,
     editingId,
     mediaAttachments,
     uploading,

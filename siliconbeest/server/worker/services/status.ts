@@ -4,6 +4,7 @@ import { parseContent, type ParsedContent } from '../utils/contentParser';
 import { AppError } from '../middleware/errorHandler';
 import type { StatusRow, PollRow, AccountRow, CustomEmojiRow } from '../types/db';
 import { serializePoll } from '../utils/mastodonSerializer';
+import { normalizeQuotePolicy, type QuotePolicy } from '../../../../packages/shared/utils/quotePolicy';
 
 // ----------------------------------------------------------------
 // getStatusById
@@ -329,6 +330,8 @@ export interface CreateStatusData {
   pollMultiple?: boolean;
   /** FEP-e232: ID of the status to quote */
   quoteId?: string;
+  /** FEP-044f: policy advertised on this status. */
+  quotePolicy?: QuotePolicy;
 }
 
 export interface LocalMention {
@@ -358,6 +361,7 @@ export interface CreateStatusResult {
   quoteAuthorizationUri: string | null;
   quoteApprovalStatus: string;
   quoteRequestUri: string | null;
+  quotePolicy: QuotePolicy;
   visibility: string;
   sensitive: number;
   spoilerText: string;
@@ -378,6 +382,13 @@ export async function createStatus(
   const language = data.language || 'en';
   const statusText = (data.text || '').trim();
   const mediaIds = data.mediaIds || [];
+  let quotePolicy = normalizeQuotePolicy(data.quotePolicy);
+  if (!data.quotePolicy) {
+    const pref = await env.DB.prepare(
+      'SELECT default_quote_policy FROM users WHERE account_id = ?1 LIMIT 1',
+    ).bind(accountId).first<{ default_quote_policy: string | null }>();
+    quotePolicy = normalizeQuotePolicy(pref?.default_quote_policy);
+  }
 
   const parsed = parseContent(statusText, domain);
   const content = parsed.html;
@@ -474,8 +485,8 @@ export async function createStatus(
   // -- Main batch: status INSERT + account count + reply count + media linking + home_timeline --
   const stmts: D1PreparedStatement[] = [
     env.DB.prepare(
-      `INSERT INTO statuses (id, uri, url, account_id, in_reply_to_id, in_reply_to_account_id, text, content, content_warning, visibility, sensitive, language, conversation_id, reply, quote_id, quote_approval_status, quote_request_uri, local, emoji_tags, created_at, updated_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, 1, ?18, ?19, ?19)`,
+      `INSERT INTO statuses (id, uri, url, account_id, in_reply_to_id, in_reply_to_account_id, text, content, content_warning, visibility, sensitive, language, conversation_id, reply, quote_id, quote_approval_status, quote_request_uri, quote_policy, local, emoji_tags, created_at, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, 1, ?19, ?20, ?20)`,
     ).bind(
       statusId,
       statusUri,
@@ -494,6 +505,7 @@ export async function createStatus(
       quoteId,
       quoteApprovalStatus,
       quoteRequestUri,
+      quotePolicy,
       emojiTagsJson,
       now,
     ),
@@ -695,6 +707,7 @@ export async function createStatus(
     quoteAuthorizationUri: null,
     quoteApprovalStatus,
     quoteRequestUri,
+    quotePolicy,
     visibility,
     sensitive,
     spoilerText,

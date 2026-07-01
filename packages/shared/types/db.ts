@@ -66,6 +66,7 @@ export type UserRow = {
   readonly current_sign_in_ip: string | null;
   readonly last_sign_in_ip: string | null;
   readonly chosen_languages: string | null;
+  readonly default_quote_policy?: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 };
@@ -113,6 +114,8 @@ export type StatusRow = {
   readonly quote_approval_status?: string | null;
   /** FEP-044f: URI of the QuoteRequest activity sent for this quote post. */
   readonly quote_request_uri?: string | null;
+  /** FEP-044f: public | followers | nobody. */
+  readonly quote_policy?: string | null;
   /** JSON array of emoji tag objects from ActivityPub for lazy-load rendering */
   readonly emoji_tags: string | null;
   readonly created_at: string;

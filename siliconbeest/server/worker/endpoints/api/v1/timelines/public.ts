@@ -92,6 +92,8 @@ app.get('/', authOptional, async (c) => {
         bookmarked: origE?.bookmarked,
         card: origE?.card, poll: origE?.poll,
         emojis: origE?.emojis,
+        quotePolicyAllows: origE?.quotePolicyAllows,
+        quotePolicyReason: origE?.quotePolicyReason,
       }));
     }
   }
@@ -121,6 +123,8 @@ app.get('/', authOptional, async (c) => {
       card: e?.card, poll: e?.poll,
       quote: e?.quote,
       emojis: e?.emojis,
+      quotePolicyAllows: e?.quotePolicyAllows,
+      quotePolicyReason: e?.quotePolicyReason,
     });
     if (row.reblog_of_id) {
       s.reblog = reblogMap.get(row.reblog_of_id) ?? null;

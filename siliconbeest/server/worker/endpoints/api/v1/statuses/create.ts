@@ -24,6 +24,7 @@ import type { StatusWithJoinedAccountRow, MediaAttachmentRow } from '../../../..
 import { createStatus } from '../../../../services/status';
 import { createLocalQuoteAuthorization } from '../../../../federation/helpers/quote';
 import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
+import { normalizeQuotePolicy } from '../../../../../../../packages/shared/utils/quotePolicy';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -45,6 +46,8 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     language?: string;
     /** FEP-e232: ID of the status to quote */
     quote_id?: string;
+    /** FEP-044f: public | followers | nobody */
+    quote_policy?: string;
   };
   try {
     body = await c.req.json();
@@ -74,6 +77,7 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     pollExpiresIn: body.poll?.expires_in,
     pollMultiple: body.poll?.multiple,
     quoteId: body.quote_id,
+    quotePolicy: body.quote_policy ? normalizeQuotePolicy(body.quote_policy) : undefined,
   });
 
   const {
@@ -85,6 +89,7 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     quoteAuthorizationUri: initialQuoteAuthorizationUri,
     quoteApprovalStatus: initialQuoteApprovalStatus,
     quoteRequestUri,
+    quotePolicy,
     visibility, sensitive, spoilerText, language,
   } = result;
   const now = new Date().toISOString();
@@ -811,6 +816,9 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     content: fixedContent,
     reblog: null,
     quote: quoteStatus,
+    quote_policy: quotePolicy,
+    quote_policy_allows: visibility === 'public' || visibility === 'unlisted',
+    quote_policy_reason: null,
     application: null,
     account: accountData,
     media_attachments: mediaAttachments,

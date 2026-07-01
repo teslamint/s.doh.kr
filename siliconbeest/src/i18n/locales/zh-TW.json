@@ -121,7 +121,13 @@
     "poll_multiple": "多選",
     "poll_minutes": "分鐘",
     "poll_hours": "小時",
-    "poll_days": "天"
+    "poll_days": "天",
+    "quote_policy": {
+      "label": "引用政策",
+      "public": "允許所有人",
+      "followers": "僅限追蹤者",
+      "nobody": "不允許"
+    }
   },
   "poll": {
     "vote": "投票",
@@ -218,7 +224,11 @@
     "report": "檢舉",
     "reblogged": "已轉發",
     "cannot_boost": "此貼文無法被轉發",
-    "cannot_quote": "此貼文無法被引用"
+    "cannot_quote": "此貼文無法被引用",
+    "cannot_quote_visibility": "只有公開或未列出的貼文可以被引用",
+    "cannot_quote_policy_nobody": "作者不允許引用此貼文",
+    "cannot_quote_followers_only": "只有作者的追蹤者可以引用此貼文",
+    "cannot_quote_login_required": "以追蹤者身分登入後才能引用此貼文"
   },
   "notification": {
     "title": "通知",
@@ -366,6 +376,14 @@
     "posting": "發文",
     "posting_default_visibility": "預設貼文可見度",
     "posting_default_visibility_desc": "新貼文將預設使用此可見度。回覆串文時，可見度會被限制在上層貼文的範圍內。",
+    "default_quote_policy": "預設引用政策",
+    "default_quote_policy_desc": "選擇新貼文預設允許誰引用。",
+    "quote_policy_public": "允許所有人",
+    "quote_policy_public_desc": "任何人都可以引用此貼文。",
+    "quote_policy_followers": "僅限追蹤者",
+    "quote_policy_followers_desc": "只有追蹤你的人可以引用此貼文。",
+    "quote_policy_nobody": "不允許",
+    "quote_policy_nobody_desc": "除了你之外，沒有人可以引用此貼文。",
     "posting_visibility_saved": "預設可見度已儲存。",
     "columns": "欄位",
     "columns_desc": "選擇在寬螢幕上首頁時間軸旁顯示的欄位。",

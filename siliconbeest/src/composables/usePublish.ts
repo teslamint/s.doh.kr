@@ -3,7 +3,7 @@ import { useComposeStore } from '@/stores/compose';
 import { useStatusesStore } from '@/stores/statuses';
 import { useTimelinesStore } from '@/stores/timelines';
 import { useUiStore } from '@/stores/ui';
-import type { StatusVisibility } from '@/types/mastodon';
+import type { StatusVisibility, QuotePolicy } from '@/types/mastodon';
 
 export interface PublishPayload {
   content: string;
@@ -13,6 +13,7 @@ export interface PublishPayload {
   language?: string;
   in_reply_to_id?: string;
   quote_id?: string;
+  quote_policy?: QuotePolicy;
   media_ids?: string[];
 }
 
@@ -68,6 +69,7 @@ export function usePublish() {
     if (payload.language) compose.language = payload.language;
     if (payload.in_reply_to_id) compose.inReplyToId = payload.in_reply_to_id;
     if (payload.quote_id) compose.quoteId = payload.quote_id;
+    if (payload.quote_policy) compose.quotePolicy = payload.quote_policy;
     if (payload.media_ids?.length) {
       // Media already uploaded — store IDs are set via the composer's own flow
     }

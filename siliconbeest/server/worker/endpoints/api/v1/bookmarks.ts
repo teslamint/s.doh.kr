@@ -106,6 +106,8 @@ app.get('/', authRequired, requireScope('read:bookmarks'), async (c) => {
       card: e?.card, poll: e?.poll,
       quote: e?.quote,
       emojis: e?.emojis,
+      quotePolicyAllows: e?.quotePolicyAllows,
+      quotePolicyReason: e?.quotePolicyReason,
     });
     const statusWithPagination = status as typeof status & { _pagination_id: string };
     statusWithPagination._pagination_id = row.b_id;

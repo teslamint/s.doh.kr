@@ -6,6 +6,7 @@ import { requireScope } from '../../../../middleware/scopeCheck';
 import { AppError } from '../../../../middleware/errorHandler';
 import { isValidLocale } from '../../../../utils/locales';
 import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
+import { normalizeQuotePolicy } from '../../../../../../../packages/shared/utils/quotePolicy';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -228,11 +229,21 @@ app.patch('/update_credentials', authRequired, requireScope('write:accounts'), a
     ).bind(sourcePrivacy, now, currentUser.account_id).run();
   }
 
+  let sourceQuotePolicy: unknown = body['source[quote_policy]'];
+  if (!sourceQuotePolicy && typeof body.source === 'object' && body.source !== null) {
+    sourceQuotePolicy = (body.source as Record<string, unknown>).quote_policy;
+  }
+  if (typeof sourceQuotePolicy === 'string') {
+    await env.DB.prepare(
+      'UPDATE users SET default_quote_policy = ?1, updated_at = ?2 WHERE account_id = ?3',
+    ).bind(normalizeQuotePolicy(sourceQuotePolicy), now, currentUser.account_id).run();
+  }
+
   await updateLocalAccountEmojiTags(currentUser.account_id, domain);
 
   // Fetch updated account
   const row = await env.DB.prepare(
-    `SELECT a.*, u.locale, u.role, u.default_privacy
+    `SELECT a.*, u.locale, u.role, u.default_privacy, u.default_quote_policy
      FROM accounts a
      JOIN users u ON u.account_id = a.id
      WHERE a.id = ?1`,
@@ -272,6 +283,7 @@ app.patch('/update_credentials', authRequired, requireScope('write:accounts'), a
       note: (row.note as string) || '',
       fields: parseFields(row.fields as string | null),
       follow_requests_count: 0,
+      quote_policy: normalizeQuotePolicy(row.default_quote_policy),
     },
   });
 });

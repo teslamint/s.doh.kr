@@ -121,7 +121,13 @@
     "poll_multiple": "Multiple choices",
     "poll_minutes": "min",
     "poll_hours": "hr",
-    "poll_days": "day"
+    "poll_days": "day",
+    "quote_policy": {
+      "label": "Quote policy",
+      "public": "Allow everyone",
+      "followers": "Followers only",
+      "nobody": "Do not allow"
+    }
   },
   "poll": {
     "vote": "Vote",
@@ -218,7 +224,11 @@
     "report": "Report",
     "reblogged": "boosted",
     "cannot_boost": "This post cannot be boosted",
-    "cannot_quote": "This post cannot be quoted"
+    "cannot_quote": "This post cannot be quoted",
+    "cannot_quote_visibility": "Only public or unlisted posts can be quoted",
+    "cannot_quote_policy_nobody": "The author does not allow quotes for this post",
+    "cannot_quote_followers_only": "Only the author's followers can quote this post",
+    "cannot_quote_login_required": "Log in as a follower to quote this post"
   },
   "notification": {
     "title": "Notifications",
@@ -366,6 +376,14 @@
     "posting": "Posting",
     "posting_default_visibility": "Default post visibility",
     "posting_default_visibility_desc": "New posts will use this visibility by default. When replying to a thread, visibility will be clamped to the parent post's level.",
+    "default_quote_policy": "Default quote policy",
+    "default_quote_policy_desc": "Choose who can quote your new posts by default.",
+    "quote_policy_public": "Allow everyone",
+    "quote_policy_public_desc": "Anyone can quote this post.",
+    "quote_policy_followers": "Followers only",
+    "quote_policy_followers_desc": "Only people following you can quote this post.",
+    "quote_policy_nobody": "Do not allow",
+    "quote_policy_nobody_desc": "No one except you can quote this post.",
     "posting_visibility_saved": "Default visibility saved.",
     "columns": "Columns",
     "columns_desc": "Choose which columns to show alongside your home timeline on wide screens.",

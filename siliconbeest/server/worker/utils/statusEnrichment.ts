@@ -54,6 +54,8 @@ export type StatusEnrichment = {
   quote: MastodonStatus | null;
   emojis: EmojiInfo[];
   accountEmojis: EmojiInfo[];
+  quotePolicyAllows: boolean;
+  quotePolicyReason: string | null;
 };
 
 const EMPTY: StatusEnrichment = {
@@ -68,6 +70,8 @@ const EMPTY: StatusEnrichment = {
   quote: null,
   emojis: [],
   accountEmojis: [],
+  quotePolicyAllows: true,
+  quotePolicyReason: null,
 };
 
 /**
@@ -89,11 +93,64 @@ export async function enrichStatuses(
 
   // Initialize all entries
   for (const id of statusIds) {
-    result.set(id, { ...EMPTY, mediaAttachments: [], reactions: [], mentions: [], card: null, poll: null, quote: null, emojis: [], accountEmojis: [] });
+    result.set(id, { ...EMPTY, mediaAttachments: [], reactions: [], mentions: [], card: null, poll: null, quote: null, emojis: [], accountEmojis: [], quotePolicyAllows: true, quotePolicyReason: null });
   }
 
   // Build parallel queries
   const queries: Promise<void>[] = [];
+
+  queries.push(
+    env.DB
+      .prepare(
+        `SELECT id, account_id, visibility, quote_policy
+         FROM statuses WHERE id IN (${placeholders})`,
+      )
+      .bind(...statusIds)
+      .all()
+      .then(async ({ results }) => {
+        const followerTargets = new Set<string>();
+        for (const row of results ?? []) {
+          const visibility = (row.visibility as string) || 'public';
+          const policy = row.quote_policy === 'followers' || row.quote_policy === 'nobody' ? row.quote_policy as string : 'public';
+          const entry = result.get(row.id as string);
+          if (!entry) continue;
+
+          if (currentAccountId && row.account_id === currentAccountId) {
+            entry.quotePolicyAllows = visibility === 'public' || visibility === 'unlisted' || visibility === 'private';
+            entry.quotePolicyReason = null;
+          } else if (visibility !== 'public' && visibility !== 'unlisted') {
+            entry.quotePolicyAllows = false;
+            entry.quotePolicyReason = 'visibility';
+          } else if (policy === 'nobody') {
+            entry.quotePolicyAllows = false;
+            entry.quotePolicyReason = 'policy_nobody';
+          } else if (policy === 'followers') {
+            entry.quotePolicyAllows = false;
+            entry.quotePolicyReason = currentAccountId ? 'followers_only' : 'login_required';
+            if (currentAccountId) followerTargets.add(row.account_id as string);
+          } else {
+            entry.quotePolicyAllows = true;
+            entry.quotePolicyReason = null;
+          }
+        }
+
+        if (!currentAccountId || followerTargets.size === 0) return;
+        const ids = [...followerTargets];
+        const ph = ids.map(() => '?').join(',');
+        const follows = await env.DB.prepare(
+          `SELECT target_account_id FROM follows WHERE account_id = ?1 AND target_account_id IN (${ph})`,
+        ).bind(currentAccountId, ...ids).all<{ target_account_id: string }>();
+        const followed = new Set((follows.results ?? []).map((row) => row.target_account_id));
+        for (const row of results ?? []) {
+          const entry = result.get(row.id as string);
+          if (!entry || row.quote_policy !== 'followers') continue;
+          if (followed.has(row.account_id as string)) {
+            entry.quotePolicyAllows = true;
+            entry.quotePolicyReason = null;
+          }
+        }
+      }),
+  );
 
   // 1. Media attachments (always)
   queries.push(

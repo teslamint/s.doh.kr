@@ -62,6 +62,8 @@ app.get('/:id/context', authOptional, async (c) => {
       s.poll = e.poll ?? null;
       s.quote = e.quote ?? null;
       s.emojis = e.emojis ?? [];
+      s.quote_policy_allows = e.quotePolicyAllows;
+      s.quote_policy_reason = e.quotePolicyReason;
     }
     return s;
   }

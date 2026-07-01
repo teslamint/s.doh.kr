@@ -189,8 +189,11 @@ export function serializeStatus(
     mentions?: StatusMention[];
     tags?: MastodonTag[];
     emojis?: Emoji[];
+    quotePolicyAllows?: boolean;
+    quotePolicyReason?: string | null;
   },
 ): MastodonStatus {
+  const quotePolicy = row.quote_policy === 'followers' || row.quote_policy === 'nobody' ? row.quote_policy : 'public';
   return {
     id: row.id,
     uri: row.uri,
@@ -210,6 +213,11 @@ export function serializeStatus(
     in_reply_to_account_id: row.in_reply_to_account_id ?? null,
     reblog: opts.reblog ?? null,
     quote: opts.quote ?? null,
+    quote_policy: quotePolicy,
+    quote_policy_allows: opts.quotePolicyAllows ?? (
+      (row.visibility === 'public' || row.visibility === 'unlisted') && quotePolicy !== 'nobody'
+    ),
+    quote_policy_reason: opts.quotePolicyReason ?? null,
     poll: opts.poll ?? null,
     card: opts.card ?? null,
     language: row.language || null,

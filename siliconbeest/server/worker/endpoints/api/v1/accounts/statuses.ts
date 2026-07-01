@@ -37,6 +37,9 @@ function serializeStatus(row: Record<string, unknown>, domain: string) {
     content: (row.content as string) || '',
     reblog: null,
     quote: null as import('../../../../types/mastodon').Status | null,
+    quote_policy: row.quote_policy === 'followers' || row.quote_policy === 'nobody' ? row.quote_policy : 'public',
+    quote_policy_allows: true,
+    quote_policy_reason: null as string | null,
     application: null,
     account: {
       id: row.account_id as string,
@@ -206,6 +209,8 @@ app.get('/:id/statuses', authOptional, async (c) => {
       s.card = e.card ?? null;
       s.quote = e.quote ?? null;
       s.emojis = e.emojis ?? [];
+      s.quote_policy_allows = e.quotePolicyAllows;
+      s.quote_policy_reason = e.quotePolicyReason;
     }
     // Fill reblog object
     const reblogOfId = r.reblog_of_id as string | null;
@@ -222,6 +227,8 @@ app.get('/:id/statuses', authOptional, async (c) => {
           origStatus.card = origE.card ?? null;
           origStatus.quote = origE.quote ?? null;
           origStatus.emojis = origE.emojis ?? [];
+          origStatus.quote_policy_allows = origE.quotePolicyAllows;
+          origStatus.quote_policy_reason = origE.quotePolicyReason;
         }
         (s as { reblog: ReturnType<typeof serializeStatus> | null }).reblog = origStatus;
       }

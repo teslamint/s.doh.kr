@@ -58,6 +58,9 @@ function serializeStatus(row: Record<string, unknown>, domain: string, currentAc
     filtered: [] as Record<string, unknown>[],
     reblog: null,
     quote: null as import('../../../../types/mastodon').Status | null,
+    quote_policy: row.quote_policy === 'followers' || row.quote_policy === 'nobody' ? row.quote_policy : 'public',
+    quote_policy_allows: true,
+    quote_policy_reason: null as string | null,
     application: null,
     account: {
       id: row.account_id as string,
@@ -118,6 +121,8 @@ async function serializeStatusEnriched(
     status.quote = e.quote ?? null;
     status.emojis = e.emojis ?? [];
     status.mentions = e.mentions ?? [];
+    status.quote_policy_allows = e.quotePolicyAllows;
+    status.quote_policy_reason = e.quotePolicyReason;
   }
   return status;
 }

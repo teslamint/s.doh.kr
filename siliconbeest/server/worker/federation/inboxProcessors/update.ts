@@ -12,6 +12,7 @@ import type { UpdateAccountInput } from '../../repositories/account';
 import { sanitizeHtml } from '../../utils/sanitize';
 import { BaseProcessor } from './BaseProcessor';
 import { env } from 'cloudflare:workers';
+import { parseQuotePolicyFromInteractionPolicy } from '../../../../../packages/shared/utils/quotePolicy';
 
 class UpdateProcessor extends BaseProcessor {
 	async process(activity: APActivity): Promise<void> {
@@ -88,13 +89,22 @@ class UpdateProcessor extends BaseProcessor {
 
 			const sanitizedContent = sanitizeHtml(obj.content ?? '');
 			const sanitizedCw = sanitizeHtml(obj.summary ?? '');
-
-			await this.statusRepo.update(status.id, {
+			const interactionPolicy = (obj as Record<string, unknown>).interactionPolicy;
+			const statusUpdates: Parameters<typeof this.statusRepo.update>[1] = {
 				content: sanitizedContent,
 				content_warning: sanitizedCw,
 				sensitive: obj.sensitive ? 1 : 0,
 				edited_at: now,
-			});
+			};
+			if (interactionPolicy !== undefined) {
+				statusUpdates.quote_policy = parseQuotePolicyFromInteractionPolicy(
+					interactionPolicy,
+					activity.actor,
+					`${activity.actor}/followers`,
+				);
+			}
+
+			await this.statusRepo.update(status.id, statusUpdates);
 
 			// Update poll data if this is a Question
 			if (obj.type === 'Question') {
