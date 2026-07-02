@@ -119,7 +119,7 @@ const processedSpoiler = computed(() => emojifyHtml(enrichMentions(props.spoiler
     <div v-if="spoilerText">
       <p class="text-sm font-medium text-slate-700 dark:text-slate-300" v-html="processedSpoiler" />
       <button
-        @click="revealed = !revealed"
+        @click.stop="revealed = !revealed"
         class="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1 text-xs font-semibold text-slate-600 transition-colors hover:bg-brand-50 hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:bg-surface-2-dark dark:text-slate-300 dark:hover:bg-brand-950/60 dark:hover:text-brand-300"
         :aria-expanded="revealed"
       >
