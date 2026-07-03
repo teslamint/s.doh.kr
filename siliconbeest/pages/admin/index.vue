@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import AdminDashboardView from '@/views/AdminDashboardView.vue';
+import AdminDashboardView from '@/deck/views/AdminDashboardView.vue';
 
 definePageMeta({ name: 'admin-dashboard' });
 </script>

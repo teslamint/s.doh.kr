@@ -29,7 +29,7 @@ export default defineNuxtConfig({
   compatibilityDate: '2026-03-17',
   ssr: true,
   devtools: { enabled: false },
-  css: ['@/assets/main.css'],
+  css: ['@/assets/main.css', '@/assets/deck.css'],
   alias: {
     '@': fileURLToPath(new URL('./src', import.meta.url)),
   },

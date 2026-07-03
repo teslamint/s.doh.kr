@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import AdminReportDetailView from '@/views/AdminReportDetailView.vue';
+import AdminReportDetailView from '@/deck/views/AdminReportDetailView.vue';
 
 definePageMeta({ name: 'admin-report-detail' });
 

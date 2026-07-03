@@ -957,7 +957,8 @@
   "design": {
     "classicBanner": "클래식 디자인을 보고 있습니다",
     "switchToNew": "새로운 디자인 사용해 보기",
-    "backToClassic": "클래식 디자인"
+    "backToClassic": "클래식 디자인",
+    "auroraBanner": "Aurora 디자인을 보고 있습니다."
   },
   "setup": {
     "subtitle": "첫 관리자 계정을 생성합니다.",

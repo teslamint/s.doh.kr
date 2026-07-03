@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import FollowedTagsView from '@/views/FollowedTagsView.vue';
+import FollowedTagsView from '@/deck/views/FollowedTagsView.vue';
 
 definePageMeta({ name: 'followed-tags' });
 </script>

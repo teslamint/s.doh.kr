@@ -957,7 +957,8 @@
   "design": {
     "classicBanner": "You're viewing the classic design",
     "switchToNew": "Try the new look",
-    "backToClassic": "Classic design"
+    "backToClassic": "Classic design",
+    "auroraBanner": "You are viewing the Aurora design."
   },
   "setup": {
     "subtitle": "Create the first administrator account.",

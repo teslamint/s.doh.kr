@@ -957,7 +957,8 @@
   "design": {
     "classicBanner": "您正在瀏覽經典版介面",
     "switchToNew": "試試全新設計",
-    "backToClassic": "經典版介面"
+    "backToClassic": "經典版介面",
+    "auroraBanner": "您正在瀏覽 Aurora 設計。"
   },
   "setup": {
     "subtitle": "建立第一個管理員帳號。",

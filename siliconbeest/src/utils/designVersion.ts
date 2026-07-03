@@ -28,3 +28,34 @@ export function toOldPath(fullPath: string): string {
   if (isOldDesignPath(fullPath)) return fullPath;
   return fullPath === '/' ? OLD_DESIGN_PREFIX : `${OLD_DESIGN_PREFIX}${fullPath}`;
 }
+
+/**
+ * The Aurora UI (the design Deck replaced as default) is preserved under
+ * /aurora/* (see pages/aurora/ and src/views/), mirroring how the classic
+ * design lives under /old/*.
+ */
+export const AURORA_DESIGN_PREFIX = '/aurora';
+
+export function isAuroraDesignPath(path: string): boolean {
+  return path === AURORA_DESIGN_PREFIX || path.startsWith(`${AURORA_DESIGN_PREFIX}/`);
+}
+
+/** Map an /aurora/* path (or fullPath with query/hash) to its canonical equivalent. */
+export function stripAuroraPrefix(fullPath: string): string {
+  if (fullPath === AURORA_DESIGN_PREFIX) return '/';
+  if (
+    fullPath.startsWith(`${AURORA_DESIGN_PREFIX}/`) ||
+    fullPath.startsWith(`${AURORA_DESIGN_PREFIX}?`) ||
+    fullPath.startsWith(`${AURORA_DESIGN_PREFIX}#`)
+  ) {
+    const rest = fullPath.slice(AURORA_DESIGN_PREFIX.length);
+    return rest.startsWith('/') ? rest : `/${rest}`;
+  }
+  return fullPath;
+}
+
+/** Map a canonical fullPath to its /aurora/* equivalent. */
+export function toAuroraPath(fullPath: string): string {
+  if (isAuroraDesignPath(fullPath)) return fullPath;
+  return fullPath === '/' ? AURORA_DESIGN_PREFIX : `${AURORA_DESIGN_PREFIX}${fullPath}`;
+}

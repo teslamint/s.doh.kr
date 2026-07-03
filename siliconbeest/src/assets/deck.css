@@ -302,3 +302,98 @@
 .dk-app ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ---------------------------------------------------------------------------
+ * Aurora-interior skin: canonical (Deck) routes put .dk-app on <body>, and
+ * everything below re-themes Aurora-built interiors to Deck tokens. Aurora
+ * views/components are NOT edited — their Tailwind utilities and sb-*
+ * recipes consume the CSS variables remapped here. /aurora/* and /old/*
+ * never have a .dk-app ancestor, so they keep their own looks.
+ * (Unlayered rules, so they beat main.css's @layer components recipes.)
+ * ------------------------------------------------------------------------- */
+
+.dk-app {
+  /* Aurora surface tokens → Deck surfaces (both themes: dk vars flip with .dark) */
+  --color-canvas: var(--dk-bg);
+  --color-canvas-dark: var(--dk-bg);
+  --color-surface: var(--dk-surface);
+  --color-surface-dark: var(--dk-surface);
+  --color-surface-2: var(--dk-surface2);
+  --color-surface-2-dark: var(--dk-surface2);
+  --color-outline: var(--dk-border);
+  --color-outline-dark: var(--dk-border);
+
+  /* Aurora brand (indigo) scale → admin accent scale */
+  --color-brand-50: color-mix(in oklab, var(--dk-acc) 12%, white);
+  --color-brand-100: color-mix(in oklab, var(--dk-acc) 22%, white);
+  --color-brand-200: color-mix(in oklab, var(--dk-acc) 38%, white);
+  --color-brand-300: color-mix(in oklab, var(--dk-acc) 58%, white);
+  --color-brand-400: color-mix(in oklab, var(--dk-acc) 80%, white);
+  --color-brand-500: var(--dk-acc);
+  --color-brand-600: color-mix(in oklab, var(--dk-acc) 85%, black);
+  --color-brand-700: color-mix(in oklab, var(--dk-acc) 70%, black);
+  --color-brand-800: color-mix(in oklab, var(--dk-acc) 55%, black);
+  --color-brand-900: color-mix(in oklab, var(--dk-acc) 40%, black);
+  --color-brand-950: color-mix(in oklab, var(--dk-acc) 25%, black);
+
+  /* Base-layer links use indigo utilities */
+  --color-indigo-400: color-mix(in oklab, var(--dk-acc) 80%, white);
+  --color-indigo-500: var(--dk-acc);
+  --color-indigo-600: color-mix(in oklab, var(--dk-acc) 85%, black);
+
+  /* Elevation: flat hairlines + accent glow instead of indigo glow */
+  --shadow-soft: 0 0 0 0 transparent;
+  --shadow-lift: 0 8px 28px rgb(0 0 0 / 0.35);
+  --shadow-glow:
+    0 0 0 1px color-mix(in oklab, var(--dk-acc) 20%, transparent),
+    0 8px 40px -8px color-mix(in oklab, var(--dk-acc2) 45%, transparent);
+
+  /* Typography */
+  --font-ui: var(--dk-font);
+  --font-display: var(--dk-font);
+}
+
+/* Shape/typography details the token remap can't express */
+.dk-app .sb-app {
+  background: transparent; /* body.dk-app already paints the glow backdrop */
+}
+.dk-app .sb-heading {
+  font-family: var(--dk-font);
+  letter-spacing: -0.02em;
+}
+.dk-app .sb-gradient-text {
+  background-image: linear-gradient(90deg, var(--dk-acc), var(--dk-acc2));
+}
+.dk-app .sb-card {
+  border-radius: 16px;
+  box-shadow: none;
+}
+.dk-app .sb-glass {
+  background: color-mix(in oklab, var(--dk-bg) 82%, transparent);
+  border-color: var(--dk-border);
+}
+.dk-app .sb-btn-primary {
+  background-image: none;
+  background-color: var(--dk-acc);
+  color: var(--dk-acc-ink, #181322);
+}
+.dk-app .sb-btn-primary:hover {
+  filter: none;
+  box-shadow: 0 5px 18px color-mix(in oklab, var(--dk-acc) 40%, transparent);
+}
+.dk-app .sb-label {
+  font-family: var(--dk-mono);
+  font-size: 10.5px;
+}
+.dk-app .sb-chip {
+  font-family: var(--dk-mono);
+}
+.dk-app .sb-avatar-ring {
+  background-image: linear-gradient(135deg, var(--dk-acc), var(--dk-acc2));
+}
+.dk-app .sb-aurora::before {
+  background: radial-gradient(closest-side, var(--dk-acc), transparent 70%);
+}
+.dk-app .sb-aurora::after {
+  background: radial-gradient(closest-side, var(--dk-acc2), transparent 70%);
+}

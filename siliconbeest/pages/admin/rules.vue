@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import AdminRulesView from '@/views/AdminRulesView.vue';
+import AdminRulesView from '@/deck/views/AdminRulesView.vue';
 
 definePageMeta({ name: 'admin-rules' });
 </script>

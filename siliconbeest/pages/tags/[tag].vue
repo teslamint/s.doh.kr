@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import TagTimelineView from '@/views/TagTimelineView.vue';
+import TagTimelineView from '@/deck/views/TagTimelineView.vue';
 
 definePageMeta({ name: 'tag' });
 </script>

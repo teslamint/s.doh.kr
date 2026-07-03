@@ -957,7 +957,8 @@
   "design": {
     "classicBanner": "您正在浏览经典版界面",
     "switchToNew": "试试全新设计",
-    "backToClassic": "经典版界面"
+    "backToClassic": "经典版界面",
+    "auroraBanner": "您正在浏览 Aurora 设计。"
   },
   "setup": {
     "subtitle": "创建第一个管理员账号。",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import AdminAnnouncementsView from '@/views/AdminAnnouncementsView.vue';
+import AdminAnnouncementsView from '@/deck/views/AdminAnnouncementsView.vue';
 
 definePageMeta({ name: 'admin-announcements' });
 </script>

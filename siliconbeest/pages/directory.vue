@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import DirectoryView from '@/views/DirectoryView.vue';
+import DirectoryView from '@/deck/views/DirectoryView.vue';
 
 definePageMeta({ name: 'directory' });
 </script>

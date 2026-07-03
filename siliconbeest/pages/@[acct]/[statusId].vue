@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import StatusDetailView from '@/views/StatusDetailView.vue';
+import StatusDetailView from '@/deck/views/StatusDetailView.vue';
 
 definePageMeta({ name: 'status-detail' });
 </script>

@@ -1,5 +1,10 @@
 import { useAuthStore } from '@/stores/auth';
-import { isOldDesignPath, stripOldPrefix } from '@/utils/designVersion';
+import {
+  isOldDesignPath,
+  stripOldPrefix,
+  isAuroraDesignPath,
+  stripAuroraPrefix,
+} from '@/utils/designVersion';
 
 const AUTH_TOKEN_COOKIE = 'siliconbeest_token';
 
@@ -33,16 +38,21 @@ export default defineNuxtRouteMiddleware((to) => {
   const auth = useAuthStore();
   auth.syncTokenFromCookie(token.value ?? null);
 
-  // /old/* mirrors the canonical routes with the classic design; apply the
-  // same rules and keep redirect targets inside the /old tree.
+  // /old/* and /aurora/* mirror the canonical routes with the classic and
+  // Aurora designs; apply the same rules and keep redirect targets inside
+  // the same tree.
   const old = isOldDesignPath(to.path);
-  const path = stripOldPrefix(to.path);
+  const aurora = isAuroraDesignPath(to.path);
+  const path = old ? stripOldPrefix(to.path) : aurora ? stripAuroraPrefix(to.path) : to.path;
 
   if (GUEST_ONLY_PATHS.has(path) && token.value) {
-    return navigateTo(old ? '/old/home' : '/home');
+    return navigateTo(old ? '/old/home' : aurora ? '/aurora/home' : '/home');
   }
 
   if (isAuthOnly(path) && !token.value) {
-    return navigateTo({ path: old ? '/old/login' : '/login', query: { redirect: to.fullPath } });
+    return navigateTo({
+      path: old ? '/old/login' : aurora ? '/aurora/login' : '/login',
+      query: { redirect: to.fullPath },
+    });
   }
 });

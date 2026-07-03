@@ -8,7 +8,12 @@ import Modal from '@/components/common/Modal.vue';
 import StatusComposer from '@/components/status/StatusComposer.vue';
 import LegacyModal from '@/legacy/components/common/Modal.vue';
 import LegacyStatusComposer from '@/legacy/components/status/StatusComposer.vue';
-import { isOldDesignPath, stripOldPrefix } from '@/utils/designVersion';
+import {
+  isOldDesignPath,
+  stripOldPrefix,
+  isAuroraDesignPath,
+  stripAuroraPrefix,
+} from '@/utils/designVersion';
 
 const auth = useAuthStore();
 const ui = useUiStore();
@@ -20,6 +25,19 @@ const route = useRoute();
 const isOldDesign = computed(() => isOldDesignPath(route.path));
 const newDesignUrl = computed(() => stripOldPrefix(route.fullPath));
 
+// Canonical routes render the Deck design. The dk-app class on <body>
+// activates the Deck token/skin layer (deck.css) everywhere on those
+// routes — including teleported overlays — while /old/* and /aurora/*
+// keep their own looks.
+const isDeckDesign = computed(
+  () => !isOldDesignPath(route.path) && !isAuroraDesignPath(route.path),
+);
+useHead({
+  bodyAttrs: {
+    class: computed(() => (isDeckDesign.value ? 'dk-app' : '')),
+  },
+});
+
 const BANNER_DISMISSED_KEY = 'siliconbeest_classic_banner_dismissed';
 const bannerDismissed = ref(
   import.meta.client && sessionStorage.getItem(BANNER_DISMISSED_KEY) === '1',
@@ -28,6 +46,20 @@ const bannerDismissed = ref(
 function dismissBanner() {
   bannerDismissed.value = true;
   if (import.meta.client) sessionStorage.setItem(BANNER_DISMISSED_KEY, '1');
+}
+
+// Aurora design lives under /aurora/*; offer the way back to Deck.
+const isAuroraDesign = computed(() => isAuroraDesignPath(route.path));
+const deckDesignUrl = computed(() => stripAuroraPrefix(route.fullPath));
+
+const AURORA_BANNER_DISMISSED_KEY = 'siliconbeest_aurora_banner_dismissed';
+const auroraBannerDismissed = ref(
+  import.meta.client && sessionStorage.getItem(AURORA_BANNER_DISMISSED_KEY) === '1',
+);
+
+function dismissAuroraBanner() {
+  auroraBannerDismissed.value = true;
+  if (import.meta.client) sessionStorage.setItem(AURORA_BANNER_DISMISSED_KEY, '1');
 }
 
 const composeReplyContext = computed(() => {
@@ -84,6 +116,28 @@ function handleModalClose() {
         class="shrink-0 opacity-70 hover:opacity-100"
         :aria-label="$t('common.close')"
         @click="dismissBanner"
+      >
+        ✕
+      </button>
+    </div>
+  </Transition>
+
+  <Transition name="fade">
+    <div
+      v-if="isAuroraDesign && !auroraBannerDismissed"
+      class="fixed bottom-20 md:bottom-6 left-1/2 z-40 flex w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-full bg-gray-900/90 px-4 py-2 text-sm text-white shadow-lg backdrop-blur dark:bg-white/90 dark:text-gray-900"
+    >
+      <span class="truncate">{{ $t('design.auroraBanner') }}</span>
+      <a
+        :href="deckDesignUrl"
+        class="shrink-0 font-semibold text-white underline dark:text-gray-900"
+        >{{ $t('design.switchToNew') }}</a
+      >
+      <button
+        type="button"
+        class="shrink-0 opacity-70 hover:opacity-100"
+        :aria-label="$t('common.close')"
+        @click="dismissAuroraBanner"
       >
         ✕
       </button>

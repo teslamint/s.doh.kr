@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import ConversationsView from '@/views/ConversationsView.vue';
+import ConversationsView from '@/deck/views/ConversationsView.vue';
 
 definePageMeta({ name: 'conversations' });
 </script>

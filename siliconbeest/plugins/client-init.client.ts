@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/vue';
 import { watch } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import { useInstanceStore } from '@/stores/instance';
+import { applyAccent } from '@/utils/accent';
 import { useNotificationsStore } from '@/stores/notifications';
 import { useTimelinesStore } from '@/stores/timelines';
 
@@ -31,7 +32,12 @@ export default defineNuxtPlugin((nuxtApp) => {
   auth.syncTokenFromCookie();
   auth.setReady(true);
 
-  const backgroundTasks: Promise<void>[] = [instance.init()];
+  const backgroundTasks: Promise<void>[] = [
+    instance.init().then(() => {
+      // Deck accent color — instance-wide, admin-selected (defaults inside)
+      applyAccent(instance.instance?.accent_color);
+    }),
+  ];
   if (auth.isAuthenticated && auth.token) {
     backgroundTasks.push(
       auth.fetchCurrentUser().then(async () => {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import AboutView from '@/views/AboutView.vue';
+import AboutView from '@/deck/views/AboutView.vue';
 
 definePageMeta({ name: 'about', alias: ['/about/more'] });
 </script>

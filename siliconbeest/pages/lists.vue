@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import ListsView from '@/views/ListsView.vue';
+import ListsView from '@/deck/views/ListsView.vue';
 
 definePageMeta({ name: 'lists' });
 </script>

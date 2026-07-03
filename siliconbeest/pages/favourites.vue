@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import FavouritesView from '@/views/FavouritesView.vue';
+import FavouritesView from '@/deck/views/FavouritesView.vue';
 
 definePageMeta({ name: 'favourites' });
 </script>

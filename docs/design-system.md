@@ -146,3 +146,19 @@ live in deck.css. Use the vars via recipes below or
 
 Aurora's hard rules (i18n, aria/focus preservation, `.status-content`
 untouched, no logic changes when restyling) apply to Deck verbatim.
+
+## How the trees route and skin (Deck era)
+
+- Canonical routes (`pages/*`) render Deck: bespoke deck components for the
+  home deck, plus `src/deck/views/*` copies of Aurora views whose `AppShell`/
+  `AdminLayout` was swapped for `DeckPageShell`/`DeckAdminLayout`. Keep a
+  copy's `<script>` in sync with its `src/views/` original when fixing bugs.
+- `app.vue` puts `.dk-app` on `<body>` for canonical routes only. deck.css
+  then remaps Aurora's token variables (`--color-surface*`, `--color-outline*`,
+  `--color-brand-*`, shadows, fonts) to Deck tokens and adjusts `sb-*` recipe
+  shapes — so shared, sb-styled interiors (settings/admin sub-views, modals,
+  composer) follow the Deck skin with no file edits.
+- Aurora is preserved verbatim at `/aurora/*` (`pages/aurora/*` passthroughs,
+  `aurora-` route names). `plugins/aurora-design.client.ts` rewrites in-app
+  navigation to stay inside the tree — same pattern as classic at `/old/*`.
+  Never edit `src/views/**` for Deck reasons.

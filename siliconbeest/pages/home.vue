@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import HomeView from '@/views/HomeView.vue';
+import DeckView from '@/deck/views/DeckView.vue';
 
 definePageMeta({ name: 'home' });
 </script>
 
 <template>
-  <HomeView />
+  <DeckView />
 </template>

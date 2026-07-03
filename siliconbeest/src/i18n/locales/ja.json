@@ -957,7 +957,8 @@
   "design": {
     "classicBanner": "クラシックデザインを表示中です",
     "switchToNew": "新しいデザインを試す",
-    "backToClassic": "クラシックデザイン"
+    "backToClassic": "クラシックデザイン",
+    "auroraBanner": "Aurora デザインを表示しています。"
   },
   "setup": {
     "subtitle": "最初の管理者アカウントを作成します。",

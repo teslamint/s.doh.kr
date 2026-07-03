@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import AdminAccountsView from '@/views/AdminAccountsView.vue';
+import AdminAccountsView from '@/deck/views/AdminAccountsView.vue';
 
 definePageMeta({ name: 'admin-accounts' });
 </script>

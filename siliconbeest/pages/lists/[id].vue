@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import ListTimelineView from '@/views/ListTimelineView.vue';
+import ListTimelineView from '@/deck/views/ListTimelineView.vue';
 
 definePageMeta({ name: 'list-timeline' });
 </script>
