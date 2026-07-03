@@ -1016,7 +1016,7 @@
     "nav_local": "로컬",
     "nav_federated": "연합",
     "nav_alerts": "알림",
-    "nav_requests": "요청",
+    "nav_requests": "팔로우 요청",
     "section_timelines": "타임라인"
   }
 }
