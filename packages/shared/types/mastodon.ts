@@ -127,6 +127,9 @@ export type Status = {
   reblog: Status | null;
   /** FEP-e232: Quoted status (quote post) */
   quote?: Status | null;
+  quote_policy?: 'public' | 'followers' | 'nobody';
+  quote_policy_allows?: boolean;
+  quote_policy_reason?: string | null;
   poll: Poll | null;
   card: PreviewCard | null;
   language: string | null;

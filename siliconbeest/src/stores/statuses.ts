@@ -18,6 +18,16 @@ import { useTimelinesStore } from './timelines';
 export const useStatusesStore = defineStore('statuses', () => {
   const cache = ref<Map<string, Status>>(new Map());
 
+  // Bumped when a `reaction` stream event arrives for a status — components
+  // rendering that status's reactions watch their entry and refetch.
+  const reactionPings = ref<Map<string, number>>(new Map());
+
+  function pingReaction(statusId: string) {
+    const next = new Map(reactionPings.value);
+    next.set(statusId, (next.get(statusId) ?? 0) + 1);
+    reactionPings.value = next;
+  }
+
   function cacheStatus(status: Status) {
     cache.value.set(status.id, status);
     if (status.reblog) {
@@ -98,9 +108,21 @@ export const useStatusesStore = defineStore('statuses', () => {
           timeline.statusIds.unshift(data.id);
         }
       } else if (wasReblogged && data.id) {
-        // Remove the old reblog wrapper from timelines
+        // Remove ONLY our boost wrapper from timelines — never the original
+        // (the original may legitimately appear on local/federated feeds).
+        // The unreblog API returns the ORIGINAL status, so find the wrapper
+        // in the cache by its reblog target.
         const timelinesStore = useTimelinesStore();
-        timelinesStore.removeStatus(data.id);
+        if (data.reblog?.id) {
+          // Some responses return the wrapper itself — safe to remove
+          timelinesStore.removeStatus(data.id);
+        }
+        const myAccountId = auth.currentUser?.id;
+        for (const [id, cached] of cache.value) {
+          if (id !== targetId && cached.reblog?.id === targetId && cached.account?.id === myAccountId) {
+            timelinesStore.removeStatus(id);
+          }
+        }
       }
     } catch {
       // Revert on error
@@ -152,6 +174,8 @@ export const useStatusesStore = defineStore('statuses', () => {
 
   return {
     cache,
+    reactionPings,
+    pingReaction,
     cacheStatus,
     cacheStatuses,
     getCached,

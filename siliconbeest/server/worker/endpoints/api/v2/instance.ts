@@ -3,7 +3,9 @@ import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../types';
 import { getTurnstileSettings } from '../../../utils/turnstile';
 import { MASTODON_V2_VERSION } from '../../../version';
-import { getSettings, getInstanceTitle, getRules, getStats } from '../../../services/instance';
+import { getSettings, getInstanceTitle, getRules, getStats, getContactAccount, getFirstAdminAccount } from '../../../services/instance';
+import { getRepositoryUrl } from '../../../utils/repository';
+import { serializeAccount } from '../../../utils/mastodonSerializer';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -14,19 +16,19 @@ app.get('/', async (c) => {
   const dbSettings = await getSettings([
     'site_description', 'registration_mode', 'registration_message',
     'site_contact_email', 'site_contact_username', 'site_landing_markdown',
-    'terms_of_service', 'privacy_policy',
-  ]);
+    'terms_of_service', 'privacy_policy', 'accent_color',
+  ]).catch((): Record<string, string> => ({}));
 
   // Turnstile settings (cached in KV)
-  const turnstile = await getTurnstileSettings();
+  const turnstile = await getTurnstileSettings().catch(() => ({ enabled: false, siteKey: '', secretKey: '' }));
 
-  const title = await getInstanceTitle();
-  const registrationMode = dbSettings.registration_mode || env.REGISTRATION_MODE || 'none';
+  const title = await getInstanceTitle().catch(() => env.INSTANCE_TITLE);
+  const registrationMode = dbSettings.registration_mode || env.REGISTRATION_MODE;
 
   // Usage stats + rules (parallel)
   const [stats, ruleRows] = await Promise.all([
-    getStats(),
-    getRules(),
+    getStats().catch(() => ({ activeUserCount: 0, activeMonthUserCount: 0, activeHalfyearUserCount: 0, statusCount: 0, domainCount: 0 })),
+    getRules().catch(() => []),
   ]);
 
   const rules = ruleRows.map((r) => ({
@@ -34,15 +36,24 @@ app.get('/', async (c) => {
     text: r.text,
   }));
 
+  // Contact account — same resolution as v1: an explicitly configured
+  // username wins; with no setting, the oldest admin serves as the contact.
+  const contactUsername = dbSettings.site_contact_username;
+  const contactRow = contactUsername
+    ? await getContactAccount(contactUsername).catch(() => null)
+    : await getFirstAdminAccount().catch(() => null);
+
   return c.json({
     domain,
     title,
     version: MASTODON_V2_VERSION,
-    source_url: 'https://github.com/SJang1/siliconbeest',
-    description: dbSettings.site_description || `${title} is powered by SiliconBeest, a serverless Fediverse server.`,
+    source_url: getRepositoryUrl(),
+    description: dbSettings.site_description,
     usage: {
       users: {
-        active_month: stats.userCount,
+        active: stats.activeUserCount,
+        active_month: stats.activeMonthUserCount,
+        active_half_year: stats.activeHalfyearUserCount,
       },
     },
     thumbnail: {
@@ -90,19 +101,20 @@ app.get('/', async (c) => {
       },
     },
     registrations: {
-      enabled: registrationMode !== 'none' && registrationMode !== 'closed',
+      enabled: registrationMode === 'open' || registrationMode === 'approval',
       approval_required: registrationMode === 'approval',
       message: dbSettings.registration_message || null,
       url: null,
     },
     contact: {
-      email: dbSettings.site_contact_email || `admin@${domain}`,
-      account: null,
+      email: dbSettings.site_contact_email || null,
+      account: contactRow ? serializeAccount(contactRow, { instanceDomain: domain }) : null,
     },
     rules,
     site_landing_markdown: dbSettings.site_landing_markdown || '',
     terms_of_service: dbSettings.terms_of_service || '',
     privacy_policy: dbSettings.privacy_policy || '',
+    accent_color: dbSettings.accent_color || null,
   });
 });
 

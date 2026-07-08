@@ -1,7 +1,7 @@
 /**
  * GET /api/v1/streaming — WebSocket upgrade endpoint for Mastodon Streaming API
  *
- * Authenticates the user via Bearer token (header or query param), then
+ * Authenticates the user via Bearer token, auth cookie, or query param, then
  * forwards the WebSocket upgrade to the user's StreamingDO instance.
  *
  * Query params:
@@ -14,79 +14,9 @@
 import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import type { AppVariables } from '../../../types';
-
-const CACHE_TTL_SECONDS = 300;
-
-// ---------------------------------------------------------------------------
-// Helpers (inlined because WS upgrade cannot use Hono middleware)
-// ---------------------------------------------------------------------------
-
-async function sha256(input: string): Promise<string> {
-  const data = new TextEncoder().encode(input);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hash))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-interface TokenPayload {
-  user: { id: string; account_id: string; email: string; role: string };
-  account: { id: string; username: string; domain: string | null };
-}
-
-async function resolveToken(
-  token: string,
-): Promise<TokenPayload | null> {
-  const hash = await sha256(token);
-  const cacheKey = `token:${hash}`;
-
-  // 1. KV cache lookup
-  const cached = await env.CACHE.get(cacheKey, 'json');
-  if (cached) return cached as TokenPayload;
-
-  // 2. D1 fallback
-  const row = await env.DB
-    .prepare(
-      `SELECT
-         u.id       AS user_id,
-         u.email,
-         u.role,
-         a.id       AS account_id,
-         a.username,
-         a.domain
-       FROM oauth_access_tokens t
-       JOIN users    u ON u.id = t.user_id
-       JOIN accounts a ON a.id = u.account_id
-       WHERE t.token = ?1
-         AND (t.revoked_at IS NULL)
-       LIMIT 1`,
-    )
-    .bind(token)
-    .first();
-
-  if (!row) return null;
-
-  const payload: TokenPayload = {
-    user: {
-      id: row.user_id as string,
-      account_id: row.account_id as string,
-      email: row.email as string,
-      role: row.role as string,
-    },
-    account: {
-      id: row.account_id as string,
-      username: row.username as string,
-      domain: (row.domain as string) ?? null,
-    },
-  };
-
-  // 3. Populate cache
-  await env.CACHE.put(cacheKey, JSON.stringify(payload), {
-    expirationTtl: CACHE_TTL_SECONDS,
-  });
-
-  return payload;
-}
+import { resolveToken } from '../../../services/auth';
+import { sha256 } from '../../../utils/crypto';
+import { getAuthTokenFromCookie } from '../../../utils/authCookie';
 
 // ---------------------------------------------------------------------------
 // Route
@@ -94,32 +24,58 @@ async function resolveToken(
 
 const app = new Hono<{ Variables: AppVariables }>();
 
+function debugStreaming(message: string, data?: Record<string, unknown>) {
+  console.info(`[streaming endpoint] ${message}`, data ?? {});
+}
+
+function extractBearerToken(header: string | undefined): string | null {
+  if (!header) return null;
+  const parts = header.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') return null;
+  return parts[1] ?? null;
+}
+
+async function resolveFirstValidToken(tokens: Array<string | null | undefined>) {
+  for (const token of tokens) {
+    if (!token) continue;
+    const tokenHash = await sha256(token);
+    const payload = await resolveToken(tokenHash, token);
+    if (payload) return payload;
+  }
+  return null;
+}
+
 app.get('/', async (c) => {
+  const stream = c.req.query('stream') || 'user';
+
   // 1. Require WebSocket upgrade
   const upgradeHeader = c.req.header('Upgrade');
+  debugStreaming('request', {
+    stream,
+    upgrade: upgradeHeader ?? null,
+    hasBearer: !!extractBearerToken(c.req.header('Authorization')),
+    hasCookie: !!getAuthTokenFromCookie(c.req.header('Cookie')),
+    hasQueryToken: !!c.req.query('access_token'),
+  });
+
   if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
+    debugStreaming('rejected: missing websocket upgrade', { stream });
     return c.json({ error: 'Expected WebSocket upgrade' }, 426);
   }
 
-  // 2. Extract token from Authorization header or access_token query param
-  const authHeader = c.req.header('Authorization');
-  const token =
-    (authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null) ||
-    c.req.query('access_token') ||
-    null;
-
-  if (!token) {
-    return c.json({ error: 'The access token is invalid' }, 401);
-  }
-
-  // 3. Resolve token to user
-  const payload = await resolveToken(token);
+  // 2. Resolve token to user. Browser WebSocket clients cannot set an
+  // Authorization header, so same-origin cookie auth must work here too.
+  const payload = await resolveFirstValidToken([
+    extractBearerToken(c.req.header('Authorization')),
+    getAuthTokenFromCookie(c.req.header('Cookie')),
+    c.req.query('access_token'),
+  ]);
   if (!payload) {
+    debugStreaming('rejected: invalid token', { stream });
     return c.json({ error: 'The access token is invalid' }, 401);
   }
 
   const userId = payload.user.id;
-  const stream = c.req.query('stream') || 'user';
 
   // 4. Forward upgrade to the appropriate StreamingDO instance
   //    Public streams use a shared DO, user streams use per-user DOs
@@ -140,11 +96,31 @@ app.get('/', async (c) => {
   const list = c.req.query('list');
   if (list) doUrl.searchParams.set('list', list);
 
-  return doStub.fetch(
-    new Request(doUrl.toString(), {
+  debugStreaming('forwarding to durable object', {
+    stream,
+    target: doName === '__public__' ? 'public' : 'user',
+  });
+
+  let response: Response;
+  try {
+    response = await doStub.fetch(doUrl.toString(), {
+      method: c.req.method,
       headers: c.req.raw.headers,
-    }),
-  );
+    });
+    debugStreaming('durable object response', {
+      stream,
+      status: response.status,
+      hasWebSocket: !!response.webSocket,
+    });
+  } catch (error) {
+    debugStreaming('durable object fetch failed', {
+      stream,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+
+  return response;
 });
 
 export default app;

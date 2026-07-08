@@ -10,6 +10,7 @@ import { env } from 'cloudflare:workers';
 import { createFed } from '../fedify';
 import type { FetchRemoteStatusMessage } from '../shared/types/queue';
 import { pickSignerUsername } from '../../../packages/shared/services/signer';
+import { parseQuotePolicyFromInteractionPolicy } from '../../../packages/shared/utils/quotePolicy';
 
 export async function handleFetchRemoteStatus(
   msg: FetchRemoteStatusMessage,
@@ -112,6 +113,11 @@ export async function handleFetchRemoteStatus(
 
   // Determine visibility from addressing
   const visibility = determineVisibility(objectDoc);
+  const quotePolicy = parseQuotePolicyFromInteractionPolicy(
+    objectDoc.interactionPolicy,
+    authorUri,
+    `${authorUri}/followers`,
+  );
 
   // Extract emoji tags for lazy-load rendering (no caching, just store tag array)
   const allTags = objectDoc.tag as Record<string, unknown>[] | undefined;
@@ -124,8 +130,8 @@ export async function handleFetchRemoteStatus(
     `INSERT OR IGNORE INTO statuses (
        id, account_id, uri, url, content, content_warning,
        visibility, language, in_reply_to_id, sensitive,
-       is_local, emoji_tags, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, datetime('now'))`,
+       local, quote_policy, emoji_tags, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, datetime('now'))`,
   )
     .bind(
       statusId,
@@ -138,6 +144,7 @@ export async function handleFetchRemoteStatus(
       language,
       inReplyTo,
       sensitive ? 1 : 0,
+      quotePolicy,
       JSON.stringify(emojiTags), // Store emoji tag array for lazy-load
       published,
     )

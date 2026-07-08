@@ -4,6 +4,8 @@ import type { AppVariables } from '../../../../types';
 import { authRequired } from '../../../../middleware/auth';
 import { requireScope } from '../../../../middleware/scopeCheck';
 import { AppError } from '../../../../middleware/errorHandler';
+import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
+import { normalizeQuotePolicy } from '../../../../../../../packages/shared/utils/quotePolicy';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -19,7 +21,7 @@ app.get('/verify_credentials', authRequired, requireScope('read:accounts'), asyn
   const domain = env.INSTANCE_DOMAIN;
 
   const row = await env.DB.prepare(
-    `SELECT a.*, u.locale, u.role, u.default_privacy, u.otp_enabled
+    `SELECT a.*, u.locale, u.role, u.default_privacy, u.default_quote_policy, u.otp_enabled
      FROM accounts a
      JOIN users u ON u.account_id = a.id
      WHERE a.id = ?1`,
@@ -50,7 +52,7 @@ app.get('/verify_credentials', authRequired, requireScope('read:accounts'), asyn
     following_count: (row.following_count as number) || 0,
     statuses_count: (row.statuses_count as number) || 0,
     last_status_at: (row.last_status_at as string) || null,
-    emojis: [],
+    emojis: parseCustomEmojiTagsJson(row.emoji_tags as string | null, domain),
     fields: safeJsonParse(row.fields as string | null, []),
     source: {
       privacy: (row.default_privacy as string) || 'public',
@@ -59,6 +61,7 @@ app.get('/verify_credentials', authRequired, requireScope('read:accounts'), asyn
       note: (row.note as string) || '',
       fields: safeJsonParse(row.fields as string | null, []),
       follow_requests_count: 0,
+      quote_policy: normalizeQuotePolicy(row.default_quote_policy),
     },
     role: {
       id: row.role === 'admin' ? '3' : row.role === 'moderator' ? '2' : '1',

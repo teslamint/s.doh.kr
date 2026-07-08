@@ -54,7 +54,10 @@ app.get('/:listId', authRequired, async (c) => {
       reblogged: e?.reblogged,
       bookmarked: e?.bookmarked,
       card: e?.card, poll: e?.poll,
+      quote: e?.quote,
       emojis: e?.emojis,
+      quotePolicyAllows: e?.quotePolicyAllows,
+      quotePolicyReason: e?.quotePolicyReason,
     });
   });
 

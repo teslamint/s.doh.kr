@@ -16,11 +16,15 @@ import {
   Document as APDocument,
   Source,
   Emoji as APEmoji,
+  QuoteRequest,
 } from '@fedify/vocab';
 import { Temporal } from '@js-temporal/polyfill';
 import { generateUlid } from '../../../../utils/ulid';
 import type { StatusWithJoinedAccountRow, MediaAttachmentRow } from '../../../../types/db';
 import { createStatus } from '../../../../services/status';
+import { createLocalQuoteAuthorization } from '../../../../federation/helpers/quote';
+import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
+import { normalizeQuotePolicy } from '../../../../../../../packages/shared/utils/quotePolicy';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -42,6 +46,8 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     language?: string;
     /** FEP-e232: ID of the status to quote */
     quote_id?: string;
+    /** FEP-044f: public | followers | nobody */
+    quote_policy?: string;
   };
   try {
     body = await c.req.json();
@@ -71,6 +77,7 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     pollExpiresIn: body.poll?.expires_in,
     pollMultiple: body.poll?.multiple,
     quoteId: body.quote_id,
+    quotePolicy: body.quote_policy ? normalizeQuotePolicy(body.quote_policy) : undefined,
   });
 
   const {
@@ -78,11 +85,64 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     localMentions, hashtags, emojiTags: resolvedEmojiTags,
     pollData, conversationApUri,
     inReplyToId, inReplyToAccountId,
-    quoteId, quoteUri,
+    quoteId, quoteUri, quoteUrl,
+    quoteAuthorizationUri: initialQuoteAuthorizationUri,
+    quoteApprovalStatus: initialQuoteApprovalStatus,
+    quoteRequestUri,
+    quotePolicy,
     visibility, sensitive, spoilerText, language,
   } = result;
-
   const now = new Date().toISOString();
+  let quoteAuthorizationUri = initialQuoteAuthorizationUri;
+  let quoteApprovalStatus = initialQuoteApprovalStatus;
+
+  type QuoteTarget = {
+    id: string;
+    uri: string;
+    account_id: string;
+    account_username: string;
+    account_domain: string | null;
+    account_uri: string;
+    account_inbox_url: string | null;
+    account_shared_inbox_url: string | null;
+  };
+  let quoteTarget: QuoteTarget | null = null;
+
+  if (quoteId) {
+    quoteTarget = await env.DB.prepare(
+      `SELECT s.id, s.uri, s.account_id,
+              a.username AS account_username, a.domain AS account_domain,
+              a.uri AS account_uri, a.inbox_url AS account_inbox_url,
+              a.shared_inbox_url AS account_shared_inbox_url
+       FROM statuses s
+       JOIN accounts a ON a.id = s.account_id
+       WHERE s.id = ?1 AND s.deleted_at IS NULL
+       LIMIT 1`,
+    ).bind(quoteId).first<QuoteTarget>();
+
+    if (quoteTarget) {
+      if (quoteTarget.account_id === currentUser.account_id) {
+        quoteApprovalStatus = 'accepted';
+      } else if (!quoteTarget.account_domain) {
+        quoteAuthorizationUri = await createLocalQuoteAuthorization({
+          attributedToAccountId: quoteTarget.account_id,
+          attributedToUsername: quoteTarget.account_username,
+          interactingObjectUri: statusUri,
+          interactionTargetUri: quoteTarget.uri,
+          quoteStatusId: statusId,
+          quotedStatusId: quoteTarget.id,
+          requestUri: quoteRequestUri,
+        });
+        quoteApprovalStatus = 'accepted';
+      }
+
+      await env.DB.prepare(
+        `UPDATE statuses
+         SET quote_authorization_uri = ?1, quote_approval_status = ?2, quote_request_uri = ?3, updated_at = ?4
+         WHERE id = ?5`,
+      ).bind(quoteAuthorizationUri, quoteApprovalStatus, quoteRequestUri, now, statusId).run();
+    }
+  }
 
   // Enqueue timeline fanout to followers (skip for DMs — handled after mentions are resolved)
   if (visibility !== 'direct') {
@@ -263,6 +323,14 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
       );
     }
   }
+  if (quoteUri) {
+    const fallbackQuoteUrl = quoteUrl || quoteUri;
+    if (!fixedContent.includes(quoteUri) && !fixedContent.includes(fallbackQuoteUrl)) {
+      const escapedHref = fallbackQuoteUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      const escapedText = fallbackQuoteUrl.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      fixedContent += `<span class="quote-inline"><br/>RE: <a href="${escapedHref}">${escapedText}</a></span>`;
+    }
+  }
   // Update DB content if changed
   if (fixedContent !== content) {
     await env.DB.prepare('UPDATE statuses SET content = ?1 WHERE id = ?2').bind(fixedContent, statusId).run();
@@ -298,7 +366,8 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
                 a.header_static_url AS a_header_static_url, a.locked AS a_locked, a.bot AS a_bot,
                 a.discoverable AS a_discoverable, a.followers_count AS a_followers_count,
                 a.following_count AS a_following_count, a.statuses_count AS a_statuses_count,
-                a.last_status_at AS a_last_status_at, a.created_at AS a_created_at
+                a.last_status_at AS a_last_status_at, a.created_at AS a_created_at,
+                a.emoji_tags AS a_emoji_tags
          FROM statuses s JOIN accounts a ON a.id = s.account_id WHERE s.id = ?1`,
       ).bind(statusId).first<StatusWithJoinedAccountRow>();
 
@@ -320,7 +389,7 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
           replies_count: dmRow.replies_count || 0, edited_at: dmRow.edited_at || null,
           media_attachments: mediaArr, mentions: resolvedMentions.map((rm) => ({ id: rm.account_id, username: rm.acct.split('@')[0], url: rm.actor_uri, acct: rm.acct })),
           tags: parsed.tags.map((t) => ({ name: t, url: `https://${domain}/tags/${t}` })),
-          emojis: [], reblog: null, poll: null, card: null, application: null, text: null, filtered: [],
+          emojis: resolvedEmojiTags, reblog: null, poll: null, card: null, application: null, text: null, filtered: [],
           account: {
             id: currentUser.account_id, username: dmRow.a_username, acct: dmAcct,
             display_name: dmRow.a_display_name || '', locked: !!dmRow.a_locked,
@@ -332,7 +401,7 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
             header: dmRow.a_header_url || '', header_static: dmRow.a_header_static_url || dmRow.a_header_url || '',
             followers_count: dmRow.a_followers_count || 0, following_count: dmRow.a_following_count || 0,
             statuses_count: dmRow.a_statuses_count || 0, last_status_at: dmRow.a_last_status_at || null,
-            emojis: [], fields: [],
+            emojis: parseCustomEmojiTagsJson(dmRow.a_emoji_tags as string | null, domain), fields: [],
           },
         });
 
@@ -491,7 +560,11 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
 
     // FEP-e232: Quote post
     if (quoteUri) {
+      noteValues.quote = new URL(quoteUri);
       noteValues.quoteUrl = new URL(quoteUri);
+      if (quoteAuthorizationUri) {
+        noteValues.quoteAuthorization = new URL(quoteAuthorizationUri);
+      }
     }
 
     // Conversation context
@@ -542,6 +615,22 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     // -- Send via Fedify --
     const fed = c.get('federation');
     const deliveredRecipients = new Set<string>();
+
+    if (quoteUri && quoteRequestUri && quoteApprovalStatus === 'pending' && quoteTarget?.account_domain && quoteTarget.account_uri) {
+      const quoteRequest = new QuoteRequest({
+        id: new URL(quoteRequestUri),
+        actor: new URL(actorUri),
+        object: new URL(quoteUri),
+        instrument: fedifyObject,
+        tos: [new URL(quoteTarget.account_uri)],
+        published: Temporal.Instant.from(now),
+      });
+      try {
+        await sendToRecipient(fed, currentAccount.username, quoteTarget.account_uri, quoteRequest);
+      } catch (err) {
+        console.error('QuoteRequest delivery failed:', err);
+      }
+    }
 
     // Deliver to each mentioned remote user
     for (const rm of resolvedMentions) {
@@ -606,7 +695,7 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     following_count: (accountRow.following_count as number) || 0,
     statuses_count: (accountRow.statuses_count as number) || 0,
     last_status_at: (accountRow.last_status_at as string) || null,
-    emojis: [],
+    emojis: parseCustomEmojiTagsJson(accountRow.emoji_tags as string | null, domain),
     fields: [],
   };
 
@@ -639,7 +728,7 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
         a.locked AS account_locked, a.bot AS account_bot, a.discoverable AS account_discoverable,
         a.followers_count AS account_followers_count, a.following_count AS account_following_count,
         a.statuses_count AS account_statuses_count, a.last_status_at AS account_last_status_at,
-        a.created_at AS account_created_at
+        a.created_at AS account_created_at, a.emoji_tags AS account_emoji_tags
       FROM statuses s JOIN accounts a ON a.id = s.account_id
       WHERE s.id = ?1 AND s.deleted_at IS NULL`,
     ).bind(quoteId).first();
@@ -691,13 +780,13 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
           following_count: (quotedRow.account_following_count as number) || 0,
           statuses_count: (quotedRow.account_statuses_count as number) || 0,
           last_status_at: (quotedRow.account_last_status_at as string) || null,
-          emojis: [],
+          emojis: parseCustomEmojiTagsJson(quotedRow.account_emoji_tags as string | null, domain),
           fields: [],
         },
         media_attachments: [],
         mentions: [],
         tags: [],
-        emojis: [],
+        emojis: parseCustomEmojiTagsJson(quotedRow.emoji_tags as string | null, domain),
         card: null,
         poll: null,
         edited_at: (quotedRow.edited_at as string) || null,
@@ -724,9 +813,12 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     muted: false,
     bookmarked: false,
     pinned: false,
-    content,
+    content: fixedContent,
     reblog: null,
     quote: quoteStatus,
+    quote_policy: quotePolicy,
+    quote_policy_allows: visibility === 'public' || visibility === 'unlisted',
+    quote_policy_reason: null,
     application: null,
     account: accountData,
     media_attachments: mediaAttachments,

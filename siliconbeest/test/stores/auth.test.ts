@@ -2,13 +2,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { useAuthStore } from '@/stores/auth';
 
-// Mock fetch for API calls
-global.fetch = vi.fn();
-
 describe('Auth Store', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     localStorage.removeItem("siliconbeest_token"); localStorage.removeItem("siliconbeest_theme");
+    document.cookie = 'siliconbeest_token=; Path=/; Max-Age=0';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     vi.clearAllMocks();
   });
 
@@ -19,21 +18,21 @@ describe('Auth Store', () => {
     expect(store.token).toBeNull();
   });
 
-  it('persists token to localStorage', () => {
+  it('persists token to cookie', () => {
     const store = useAuthStore();
     store.setToken('test-token-123');
-    expect(localStorage.getItem('siliconbeest_token')).toBe('test-token-123');
+    expect(document.cookie).toContain('siliconbeest_token=test-token-123');
   });
 
-  it('restores token from localStorage', () => {
-    localStorage.setItem('siliconbeest_token', 'saved-token');
+  it('restores token from cookie', () => {
+    document.cookie = 'siliconbeest_token=saved-token; Path=/';
     const store = useAuthStore();
     // Token should be restored on init
     expect(store.token).toBe('saved-token');
   });
 
   it('reports isAuthenticated when token present', () => {
-    localStorage.setItem('siliconbeest_token', 'saved-token');
+    document.cookie = 'siliconbeest_token=saved-token; Path=/';
     const store = useAuthStore();
     expect(store.isAuthenticated).toBe(true);
   });
@@ -44,7 +43,7 @@ describe('Auth Store', () => {
     await store.logout();
     expect(store.token).toBeNull();
     expect(store.isAuthenticated).toBe(false);
-    expect(localStorage.getItem('siliconbeest_token')).toBeNull();
+    expect(document.cookie).not.toContain('siliconbeest_token=');
   });
 
   it('clearToken also nulls currentUser', () => {

@@ -16,6 +16,8 @@ export interface CreateStatusParams {
   visibility?: 'public' | 'unlisted' | 'private' | 'direct';
   language?: string;
   scheduled_at?: string;
+  quote_id?: string;
+  quote_policy?: import('@/types/mastodon').QuotePolicy;
 }
 
 export function getStatus(id: string, token?: string) {

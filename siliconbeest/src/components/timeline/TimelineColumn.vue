@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Status } from '@/types/mastodon'
 import { useTimelinesStore } from '@/stores/timelines'
@@ -17,6 +17,8 @@ const props = defineProps<{
   title: string
   bannerStorageKey?: string
   bannerText?: string
+  /** Hide the column header (mobile deck provides its own tab strip). */
+  hideHeader?: boolean
 }>()
 
 const timelinesStore = useTimelinesStore()
@@ -50,6 +52,10 @@ const hasNewPosts = computed(() => timeline.value.newStatusIds.length > 0)
 // Scroll detection uses the closest scrollable parent
 const isAtTop = ref(true)
 
+function handleScroll(event: Event) {
+  isAtTop.value = (event.currentTarget as HTMLElement).scrollTop < 100
+}
+
 watch(() => timeline.value.newStatusIds.length, (len) => {
   if (len > 0 && isAtTop.value) {
     timelinesStore.showNewStatuses(props.timelineType)
@@ -68,22 +74,28 @@ async function loadMore() {
   await timelinesStore.fetchMore(props.timelineType, { token: auth.token ?? undefined })
 }
 
-onMounted(loadTimeline)
+watch(
+  () => auth.token,
+  () => {
+    void loadTimeline()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
-  <div>
+  <div class="h-full min-h-0 overflow-y-auto overscroll-contain" @scroll.passive="handleScroll">
     <!-- Timeline view -->
     <template v-if="activeView === 'timeline'">
-      <header class="sticky top-0 z-10 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm border-b border-gray-200 dark:border-gray-700 px-4 py-3">
-        <h2 class="text-lg font-bold">{{ title }}</h2>
+      <header v-if="!hideHeader" class="sb-glass sticky top-0 z-10 border-b px-4 py-3">
+        <h2 class="sb-heading text-lg">{{ title }}</h2>
       </header>
 
       <DismissibleBanner v-if="bannerStorageKey" :storage-key="bannerStorageKey">
         {{ bannerText }}
       </DismissibleBanner>
 
-      <div v-if="timeline.error" class="p-4 text-center text-red-500">
+      <div v-if="timeline.error" class="mx-4 my-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-center text-sm text-red-600 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
         {{ timeline.error }}
       </div>
 

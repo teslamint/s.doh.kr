@@ -6,11 +6,284 @@ import { serializeAccount, serializeStatus, serializeTag } from '../../../utils/
 import { enrichStatuses } from '../../../utils/statusEnrichment';
 import { generateUlid } from '../../../utils/ulid';
 import { getFedifyContext } from '../../../federation/helpers/send';
-import { isActor } from '@fedify/fedify/vocab';
+import { isActor, Note, Question } from '@fedify/fedify/vocab';
 import { pickSignerUsername } from '../../../../../../packages/shared/services/signer';
+import { processCreate } from '../../../federation/inboxProcessors/create';
+import { resolveRemoteAccount } from '../../../federation/resolveRemoteAccount';
 import type { AccountRow, StatusRow, TagRow } from '../../../types/db';
+import type { APActivity, APObject } from '../../../types/activitypub';
+import { parseQuotePolicyDetailsFromInteractionPolicy } from '../../../../../../packages/shared/utils/quotePolicy';
 
 const app = new Hono<{ Variables: AppVariables }>();
+
+type SearchViewer = {
+  id: string;
+  username: string;
+  uri: string;
+} | null;
+
+const STATUS_SEARCH_SELECT = `
+  SELECT s.*, a.id AS a_id, a.username AS a_username, a.domain AS a_domain,
+         a.display_name AS a_display_name, a.note AS a_note, a.uri AS a_uri,
+         a.url AS a_url, a.avatar_url AS a_avatar_url, a.avatar_static_url AS a_avatar_static_url,
+         a.header_url AS a_header_url, a.header_static_url AS a_header_static_url,
+         a.locked AS a_locked, a.bot AS a_bot, a.discoverable AS a_discoverable,
+         a.statuses_count AS a_statuses_count, a.followers_count AS a_followers_count,
+         a.following_count AS a_following_count, a.last_status_at AS a_last_status_at,
+         a.created_at AS a_created_at, a.suspended_at AS a_suspended_at,
+         a.memorial AS a_memorial, a.moved_to_account_id AS a_moved_to_account_id,
+         a.emoji_tags AS a_emoji_tags
+  FROM statuses s
+  JOIN accounts a ON a.id = s.account_id
+`;
+
+function isUrlQuery(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function idsFrom(value: unknown): string[] {
+  if (!value) return [];
+  if (typeof value === 'string') return [value];
+  if (value instanceof URL) return [value.href];
+  if (Array.isArray(value)) return value.flatMap(idsFrom);
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    return idsFrom(obj.id).concat(idsFrom(obj['@id'])).concat(idsFrom(obj.href));
+  }
+  return [];
+}
+
+function normalizeApObject(jsonLd: unknown, fallbackId: string, fallbackType: 'Note' | 'Question'): APObject {
+  const obj = { ...(jsonLd as Record<string, unknown>) };
+  if (typeof obj.id !== 'string') {
+    obj.id = typeof obj['@id'] === 'string' ? obj['@id'] : fallbackId;
+  }
+  if (typeof obj.type !== 'string') {
+    const typeId = typeof obj['@type'] === 'string' ? obj['@type'] : '';
+    obj.type = typeId.endsWith('#Question') || typeId.endsWith('/Question') ? 'Question' : fallbackType;
+  }
+  return obj as APObject;
+}
+
+function isPublicCollection(value: string): boolean {
+  return value === 'https://www.w3.org/ns/activitystreams#Public'
+    || value === 'as:Public'
+    || value === 'Public';
+}
+
+function resolveVisibilityFromObject(object: APObject): string {
+  const to = idsFrom((object as Record<string, unknown>).to);
+  const cc = idsFrom((object as Record<string, unknown>).cc);
+  if (to.some(isPublicCollection)) return 'public';
+  if (cc.some(isPublicCollection)) return 'unlisted';
+  if (to.some((target) => target.endsWith('/followers'))) return 'private';
+  return 'direct';
+}
+
+function tagMentionsActor(tag: unknown, actorUri: string): boolean {
+  const tags = Array.isArray(tag) ? tag : tag ? [tag] : [];
+  return tags.some((item) => {
+    if (!item || typeof item !== 'object') return false;
+    const tag = item as Record<string, unknown>;
+    if (tag.type !== 'Mention') return false;
+    return idsFrom(tag.href).concat(idsFrom(tag.id)).includes(actorUri);
+  });
+}
+
+async function followsAccount(viewerAccountId: string, targetAccountId: string): Promise<boolean> {
+  const row = await env.DB.prepare(
+    'SELECT 1 FROM follows WHERE account_id = ?1 AND target_account_id = ?2 LIMIT 1',
+  ).bind(viewerAccountId, targetAccountId).first();
+  return !!row;
+}
+
+async function canViewStoredStatus(statusId: string, viewerAccountId: string | null): Promise<boolean> {
+  const row = await env.DB.prepare(
+    'SELECT account_id, visibility FROM statuses WHERE id = ?1 AND deleted_at IS NULL LIMIT 1',
+  ).bind(statusId).first<{ account_id: string; visibility: string }>();
+  if (!row) return false;
+  if (row.visibility === 'public' || row.visibility === 'unlisted') return true;
+  if (!viewerAccountId) return false;
+  if (row.account_id === viewerAccountId) return true;
+  if (row.visibility === 'private') {
+    return followsAccount(viewerAccountId, row.account_id);
+  }
+  if (row.visibility === 'direct') {
+    const mention = await env.DB.prepare(
+      'SELECT 1 FROM mentions WHERE status_id = ?1 AND account_id = ?2 LIMIT 1',
+    ).bind(statusId, viewerAccountId).first();
+    return !!mention;
+  }
+  return false;
+}
+
+async function canViewRemoteObject(
+  object: APObject,
+  visibility: string,
+  actorUri: string,
+  actorAccountId: string,
+  viewer: SearchViewer,
+): Promise<boolean> {
+  if (visibility === 'public' || visibility === 'unlisted') return true;
+  if (!viewer) return false;
+  if (actorUri === viewer.uri) return true;
+
+  const obj = object as Record<string, unknown>;
+  const audience = [
+    ...idsFrom(obj.to),
+    ...idsFrom(obj.cc),
+    ...idsFrom(obj.bto),
+    ...idsFrom(obj.bcc),
+    ...idsFrom(obj.audience),
+  ];
+  if (audience.includes(viewer.uri) || tagMentionsActor(obj.tag, viewer.uri)) {
+    return true;
+  }
+  if (visibility === 'private') {
+    return followsAccount(viewer.id, actorAccountId);
+  }
+  return false;
+}
+
+async function findStatusByUriOrUrl(uriOrUrl: string): Promise<{
+  id: string;
+  visibility: string;
+  quote_policy: string | null;
+  quote_policy_automatic_approvals: string | null;
+  quote_policy_manual_approvals: string | null;
+} | null> {
+  const row = await env.DB.prepare(
+    `SELECT id, visibility, quote_policy, quote_policy_automatic_approvals, quote_policy_manual_approvals FROM statuses
+     WHERE (uri = ?1 OR url = ?1)
+       AND deleted_at IS NULL
+     LIMIT 1`,
+  ).bind(uriOrUrl).first<{
+    id: string;
+    visibility: string;
+    quote_policy: string | null;
+    quote_policy_automatic_approvals: string | null;
+    quote_policy_manual_approvals: string | null;
+  }>();
+  return row ?? null;
+}
+
+async function fetchJoinedStatusById(statusId: string): Promise<Record<string, unknown> | null> {
+  return await env.DB.prepare(
+    `${STATUS_SEARCH_SELECT}
+     WHERE s.id = ?1
+       AND s.deleted_at IS NULL
+     LIMIT 1`,
+  ).bind(statusId).first<Record<string, unknown>>();
+}
+
+async function resolveRemoteStatusFromUrl(
+  url: string,
+  fed: NonNullable<AppVariables['federation']>,
+  viewer: SearchViewer,
+): Promise<string | null> {
+  const normalizedUrl = new URL(url).href;
+  const existing = await findStatusByUriOrUrl(normalizedUrl);
+  const isLocalUrl = new URL(normalizedUrl).host === env.INSTANCE_DOMAIN;
+  const existingVisible = existing ? await canViewStoredStatus(existing.id, viewer?.id ?? null) : false;
+  if (existing) {
+    if (isLocalUrl) return existingVisible ? existing.id : null;
+  }
+  if (isLocalUrl) return null;
+
+  const ctx = getFedifyContext(fed);
+  const signerUsername = await pickSignerUsername(env.DB, viewer?.id ?? null);
+  if (!signerUsername) {
+    console.warn('[search] No local signer available, skipping remote status fetch');
+    return existingVisible ? existing?.id ?? null : null;
+  }
+
+  const docLoader = await ctx.getDocumentLoader({ identifier: signerUsername });
+  let remoteObject: unknown;
+  try {
+    remoteObject = await ctx.lookupObject(normalizedUrl, { documentLoader: docLoader });
+  } catch (e) {
+    console.warn('[search] remote status lookupObject failed:', e);
+    return existingVisible ? existing?.id ?? null : null;
+  }
+
+  const isStatusObject = remoteObject instanceof Note || remoteObject instanceof Question
+    || (remoteObject && typeof remoteObject === 'object' && ['Note', 'Question'].includes((remoteObject as { constructor?: { name?: string } }).constructor?.name ?? ''));
+  if (!isStatusObject) return existingVisible ? existing?.id ?? null : null;
+
+  const statusObject = remoteObject as Note | Question;
+  const objectId = statusObject.id?.href;
+  if (!objectId) return existingVisible ? existing?.id ?? null : null;
+
+  const fallbackType = remoteObject instanceof Question || (remoteObject as { constructor?: { name?: string } }).constructor?.name === 'Question'
+    ? 'Question'
+    : 'Note';
+  const jsonLd = await statusObject.toJsonLd({ contextLoader: docLoader });
+  const object = normalizeApObject(jsonLd, objectId, fallbackType);
+  const actor = statusObject.attributionId?.href ?? idsFrom((object as Record<string, unknown>).attributedTo)[0];
+  if (!actor) {
+    console.warn(`[search] remote status has no attributedTo: ${objectId}`);
+    return null;
+  }
+  const actorAccountId = await resolveRemoteAccount(actor, viewer?.id ?? null);
+  if (!actorAccountId) return null;
+  const visibility = resolveVisibilityFromObject(object);
+  const remoteVisible = await canViewRemoteObject(object, visibility, actor, actorAccountId, viewer);
+  const interactionPolicy = (object as Record<string, unknown>).interactionPolicy;
+  const quotePolicyDetails = parseQuotePolicyDetailsFromInteractionPolicy(
+    interactionPolicy,
+    actor,
+    `${actor}/followers`,
+  );
+  const quotePolicy = quotePolicyDetails.policy;
+  const automaticApprovalsJson = interactionPolicy !== undefined
+    ? JSON.stringify(quotePolicyDetails.automaticApprovals)
+    : null;
+  const manualApprovalsJson = interactionPolicy !== undefined
+    ? JSON.stringify(quotePolicyDetails.manualApprovals)
+    : null;
+
+  const existingByObjectId = await findStatusByUriOrUrl(objectId);
+  const existingStatus = existingByObjectId ?? existing;
+  if (existingStatus) {
+    if (!remoteVisible) return null;
+    if (
+      visibility !== existingStatus.visibility
+      || quotePolicy !== existingStatus.quote_policy
+      || automaticApprovalsJson !== existingStatus.quote_policy_automatic_approvals
+      || manualApprovalsJson !== existingStatus.quote_policy_manual_approvals
+    ) {
+      await env.DB.prepare(
+        `UPDATE statuses
+         SET visibility = ?1,
+             quote_policy = ?2,
+             quote_policy_automatic_approvals = ?3,
+             quote_policy_manual_approvals = ?4,
+             updated_at = ?5
+         WHERE id = ?6`,
+      ).bind(visibility, quotePolicy, automaticApprovalsJson, manualApprovalsJson, new Date().toISOString(), existingStatus.id).run();
+    }
+    return await canViewStoredStatus(existingStatus.id, viewer?.id ?? null) ? existingStatus.id : null;
+  }
+
+  if (!remoteVisible) return null;
+
+  const activity: APActivity = {
+    type: 'Create',
+    id: `${objectId}#search-fetch`,
+    actor,
+    object,
+  };
+
+  await processCreate(activity, viewer?.id ?? null, { fanout: false, notify: false });
+  const stored = await findStatusByUriOrUrl(objectId);
+  if (!stored || !await canViewStoredStatus(stored.id, viewer?.id ?? null)) return null;
+  return stored.id;
+}
 
 app.get('/', authOptional, async (c) => {
   const q = c.req.query('q')?.trim();
@@ -54,8 +327,15 @@ app.get('/', authOptional, async (c) => {
     if (resolve && looksLikeAcct) {
       const fed = c.get('federation');
       const ctx = getFedifyContext(fed);
-      // Normalize acct for WebFinger lookup
-      const normalizedAcct = q.replace(/^@/, '');
+      // Normalize acct for WebFinger lookup: the domain part is case-insensitive
+      // (RFC 7565 lowercases the acct host) — strict remotes match the resource
+      // case-sensitively. Username casing is preserved. Split on the LAST '@'
+      // to match Fedify's own server extraction.
+      const cleanedQ = q.replace(/^@/, '');
+      const atPos = cleanedQ.lastIndexOf('@');
+      const normalizedAcct = atPos === -1
+        ? cleanedQ
+        : `${cleanedQ.slice(0, atPos)}@${cleanedQ.slice(atPos + 1).toLowerCase()}`;
       const wfResult = await ctx.lookupWebFinger(`acct:${normalizedAcct}`);
       // Extract actor URI from self link
       const selfLink = wfResult?.links?.find(
@@ -172,28 +452,40 @@ app.get('/', authOptional, async (c) => {
 
   // Search statuses
   if (!type || type === 'statuses') {
-    const { results } = await env.DB.prepare(`
-      SELECT s.*, a.id AS a_id, a.username AS a_username, a.domain AS a_domain,
-             a.display_name AS a_display_name, a.note AS a_note, a.uri AS a_uri,
-             a.url AS a_url, a.avatar_url AS a_avatar_url, a.avatar_static_url AS a_avatar_static_url,
-             a.header_url AS a_header_url, a.header_static_url AS a_header_static_url,
-             a.locked AS a_locked, a.bot AS a_bot, a.discoverable AS a_discoverable,
-             a.statuses_count AS a_statuses_count, a.followers_count AS a_followers_count,
-             a.following_count AS a_following_count, a.last_status_at AS a_last_status_at,
-             a.created_at AS a_created_at, a.suspended_at AS a_suspended_at,
-             a.memorial AS a_memorial, a.moved_to_account_id AS a_moved_to_account_id,
-             a.emoji_tags AS a_emoji_tags
-      FROM statuses s
-      JOIN accounts a ON a.id = s.account_id
-      WHERE s.content LIKE ?1
-        AND s.visibility = 'public'
-        AND s.deleted_at IS NULL
-      ORDER BY s.id DESC
-      LIMIT ?2 OFFSET ?3
-    `).bind(searchTerm, limit, offset).all();
+    const urlQuery = isUrlQuery(q);
+    const { results } = urlQuery
+      ? { results: [] }
+      : await env.DB.prepare(`
+        ${STATUS_SEARCH_SELECT}
+        WHERE s.content LIKE ?1
+          AND s.visibility = 'public'
+          AND s.deleted_at IS NULL
+        ORDER BY s.id DESC
+        LIMIT ?2 OFFSET ?3
+      `).bind(searchTerm, limit, offset).all();
 
-    const statusIds = (results ?? []).map((r: any) => r.id as string);
     const currentAccount = c.get('currentAccount');
+    const viewer: SearchViewer = currentAccount
+      ? {
+          id: currentAccount.id,
+          username: currentAccount.username,
+          uri: `https://${domain}/users/${currentAccount.username}`,
+        }
+      : null;
+    const statusRows: Record<string, unknown>[] = [...((results ?? []) as Record<string, unknown>[])];
+    if (resolve && urlQuery) {
+      const resolvedStatusId = await resolveRemoteStatusFromUrl(
+        q,
+        c.get('federation'),
+        viewer,
+      );
+      if (resolvedStatusId && !statusRows.some((row) => row.id === resolvedStatusId)) {
+        const resolvedRow = await fetchJoinedStatusById(resolvedStatusId);
+        if (resolvedRow) statusRows.unshift(resolvedRow);
+      }
+    }
+
+    const statusIds = statusRows.map((r) => r.id as string);
     const enrichments = await enrichStatuses(
       domain,
       statusIds,
@@ -201,7 +493,7 @@ app.get('/', authOptional, async (c) => {
       env.CACHE,
     );
 
-    statuses = (results ?? []).map((row: any) => {
+    statuses = statusRows.map((row: any) => {
       const accountRow: AccountRow = {
         id: row.a_id, username: row.a_username, domain: row.a_domain,
         display_name: row.a_display_name, note: row.a_note, uri: row.a_uri,
@@ -225,6 +517,8 @@ app.get('/', authOptional, async (c) => {
         bookmarked: e?.bookmarked,
         card: e?.card, poll: e?.poll,
         emojis: e?.emojis,
+        quotePolicyAllows: e?.quotePolicyAllows,
+        quotePolicyReason: e?.quotePolicyReason,
       });
     });
   }

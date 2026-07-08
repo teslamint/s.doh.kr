@@ -12,21 +12,14 @@ const baseProps = {
   bookmarked: false,
 };
 
+// Button order with menus closed:
+// 0 reply, 1 boost/quote menu trigger, 2 favourite/react menu trigger,
+// 3 bookmark, 4 share, 5 more menu = 6 buttons
 describe('StatusActions', () => {
   it('renders all action buttons', () => {
     const wrapper = mountWithPlugins(StatusActions, { props: baseProps });
     const buttons = wrapper.findAll('button');
-    // reply, reblog, favourite, bookmark, share, more menu = 6 buttons
     expect(buttons.length).toBe(6);
-  });
-
-  it('emits favourite event on favourite button click', async () => {
-    const wrapper = mountWithPlugins(StatusActions, { props: baseProps });
-    const buttons = wrapper.findAll('button');
-    // favourite is the 3rd button (index 2)
-    await buttons[2].trigger('click');
-    expect(wrapper.emitted('favourite')).toBeTruthy();
-    expect(wrapper.emitted('favourite')![0]).toEqual(['123']);
   });
 
   it('emits reply event on reply button click', async () => {
@@ -37,12 +30,49 @@ describe('StatusActions', () => {
     expect(wrapper.emitted('reply')![0]).toEqual(['123']);
   });
 
-  it('emits reblog event on reblog button click', async () => {
+  it('emits reblog event via the boost menu', async () => {
     const wrapper = mountWithPlugins(StatusActions, { props: baseProps });
-    const buttons = wrapper.findAll('button');
-    await buttons[1].trigger('click');
+    // Open the boost/quote menu
+    await wrapper.findAll('button')[1].trigger('click');
+    const menuItems = wrapper.findAll('[role="menu"] button');
+    expect(menuItems.length).toBe(2);
+    await menuItems[0].trigger('click');
     expect(wrapper.emitted('reblog')).toBeTruthy();
     expect(wrapper.emitted('reblog')![0]).toEqual(['123']);
+  });
+
+  it('emits quote event via the boost menu', async () => {
+    // Boolean props default to false when absent; the server sends
+    // quote_policy_allows explicitly, so mirror that here.
+    const wrapper = mountWithPlugins(StatusActions, {
+      props: { ...baseProps, quotePolicyAllows: true },
+    });
+    await wrapper.findAll('button')[1].trigger('click');
+    const menuItems = wrapper.findAll('[role="menu"] button');
+    await menuItems[1].trigger('click');
+    expect(wrapper.emitted('quote')).toBeTruthy();
+    expect(wrapper.emitted('quote')![0]).toEqual(['123']);
+  });
+
+  it('emits favourite event via the favourite menu', async () => {
+    const wrapper = mountWithPlugins(StatusActions, { props: baseProps });
+    // Open the favourite/react menu
+    await wrapper.findAll('button')[2].trigger('click');
+    const menuItems = wrapper.findAll('[role="menu"] button');
+    expect(menuItems.length).toBe(2);
+    await menuItems[0].trigger('click');
+    expect(wrapper.emitted('favourite')).toBeTruthy();
+    expect(wrapper.emitted('favourite')![0]).toEqual(['123']);
+  });
+
+  it('emits react event via the favourite menu', async () => {
+    const wrapper = mountWithPlugins(StatusActions, { props: baseProps });
+    await wrapper.findAll('button')[2].trigger('click');
+    const menuItems = wrapper.findAll('[role="menu"] button');
+    await menuItems[1].trigger('click');
+    expect(wrapper.emitted('react')).toBeTruthy();
+    // Payload: status id + the favourite button as picker anchor
+    expect(wrapper.emitted('react')![0]![0]).toBe('123');
   });
 
   it('emits bookmark event on bookmark button click', async () => {
@@ -65,18 +95,16 @@ describe('StatusActions', () => {
     const wrapper = mountWithPlugins(StatusActions, {
       props: { ...baseProps, favourited: true },
     });
-    const buttons = wrapper.findAll('button');
-    const favButton = buttons[2];
+    const favButton = wrapper.findAll('button')[2];
     expect(favButton.attributes('aria-pressed')).toBe('true');
-    expect(favButton.html()).toContain('text-yellow-500');
+    expect(favButton.html()).toContain('text-rose-500');
   });
 
   it('shows active state when reblogged', () => {
     const wrapper = mountWithPlugins(StatusActions, {
       props: { ...baseProps, reblogged: true },
     });
-    const buttons = wrapper.findAll('button');
-    const reblogButton = buttons[1];
+    const reblogButton = wrapper.findAll('button')[1];
     expect(reblogButton.attributes('aria-pressed')).toBe('true');
     expect(reblogButton.html()).toContain('text-green-600');
   });
@@ -85,10 +113,9 @@ describe('StatusActions', () => {
     const wrapper = mountWithPlugins(StatusActions, {
       props: { ...baseProps, bookmarked: true },
     });
-    const buttons = wrapper.findAll('button');
-    const bookmarkButton = buttons[3];
+    const bookmarkButton = wrapper.findAll('button')[3];
     expect(bookmarkButton.attributes('aria-pressed')).toBe('true');
-    expect(bookmarkButton.html()).toContain('text-indigo-600');
+    expect(bookmarkButton.html()).toContain('text-amber-500');
   });
 
   it('displays formatted counts', () => {
@@ -111,7 +138,8 @@ describe('StatusActions', () => {
       props: { ...baseProps, repliesCount: 0, reblogsCount: 0, favouritesCount: 0 },
     });
     // All counts are 0, so formatCount returns '' for them
-    const spans = wrapper.findAll('span.text-xs');
+    const spans = wrapper.findAll('span.tabular-nums');
+    expect(spans.length).toBeGreaterThan(0);
     for (const span of spans) {
       expect(span.text()).toBe('');
     }

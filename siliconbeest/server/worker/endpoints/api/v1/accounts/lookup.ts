@@ -6,6 +6,7 @@ import { getFedifyContext } from '../../../../federation/helpers/send';
 import { isActor } from '@fedify/fedify/vocab';
 import { getAccountByUsername } from '../../../../services/account';
 import { pickSignerUsername } from '../../../../../../../packages/shared/services/signer';
+import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -28,10 +29,14 @@ app.get('/lookup', async (c) => {
   const cleaned = acct.replace(/^@/, '');
   const parts = cleaned.split('@');
   const username = parts[0]!;
-  const acctDomain = parts[1] || null;
+  // Domains are DNS names (case-insensitive): normalize to lowercase so the
+  // instance-domain check, WebFinger resource, INSERT, and re-SELECT all use
+  // the canonical form (remote rows store URL.host, which is lowercase).
+  // The username intentionally keeps its exact case (AP identity).
+  const acctDomain = parts[1]?.toLowerCase() || null;
 
   let row;
-  if (!acctDomain || acctDomain === instanceDomain) {
+  if (!acctDomain || acctDomain === instanceDomain.toLowerCase()) {
     // Local account
     row = await getAccountByUsername(username);
   } else {
@@ -40,7 +45,7 @@ app.get('/lookup', async (c) => {
   }
 
   // If remote account not in DB, try WebFinger + Fedify lookupObject
-  if (!row && acctDomain && acctDomain !== instanceDomain) {
+  if (!row && acctDomain && acctDomain !== instanceDomain.toLowerCase()) {
     console.log(`[lookup] Remote account not in DB, resolving ${username}@${acctDomain}`);
     try {
       const fed = c.get('federation');
@@ -116,28 +121,7 @@ app.get('/lookup', async (c) => {
   if (!row) throw new AppError(404, 'Record not found');
   const domain = row.domain as string | null;
 
-  // Parse account emoji_tags and proxy URLs
-  let emojis: Array<{ shortcode: string; url: string; static_url: string; visible_in_picker: boolean }> = [];
-  const emojiTagsRaw = row.emoji_tags as string | null;
-  if (emojiTagsRaw) {
-    try {
-      const tags = JSON.parse(emojiTagsRaw) as Array<{ shortcode?: string; name?: string; url?: string; static_url?: string }>;
-      emojis = tags.map((t) => {
-        const sc = t.shortcode || (t.name || '').replace(/^:|:$/g, '');
-        const rawUrl = t.url || '';
-        const rawStatic = t.static_url || rawUrl;
-        const proxyIt = (u: string) => {
-          if (!u) return u;
-          try {
-            const p = new URL(u);
-            if (p.hostname === instanceDomain) return u;
-            return `https://${instanceDomain}/proxy?url=${encodeURIComponent(u)}`;
-          } catch { return u; }
-        };
-        return { shortcode: sc, url: proxyIt(rawUrl), static_url: proxyIt(rawStatic), visible_in_picker: false };
-      });
-    } catch { /* ignore */ }
-  }
+  const emojis = parseCustomEmojiTagsJson(row.emoji_tags as string | null, instanceDomain);
 
   return c.json({
     id: row.id as string,

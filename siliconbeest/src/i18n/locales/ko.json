@@ -16,7 +16,12 @@
     "copied": "클립보드에 복사됨",
     "upload": "업로드",
     "uploading": "업로드 중...",
-    "load_more": "더 보기"
+    "load_more": "더 보기",
+    "previous": "이전",
+    "remove": "제거",
+    "move_up": "위로 이동",
+    "move_down": "아래로 이동",
+    "auto": "자동"
   },
   "auth": {
     "login": "로그인",
@@ -121,7 +126,16 @@
     "poll_multiple": "복수 선택",
     "poll_minutes": "분",
     "poll_hours": "시간",
-    "poll_days": "일"
+    "poll_days": "일",
+    "post_visibility_label": "게시글 공개범위",
+    "quote_permission_label": "인용 허용",
+    "post_language_label": "게시글 언어",
+    "quote_policy": {
+      "label": "인용 정책",
+      "public": "모두 허용",
+      "followers": "팔로워만",
+      "nobody": "허용 안 함"
+    }
   },
   "poll": {
     "vote": "투표",
@@ -156,7 +170,10 @@
     "followed_tags": "팔로우한 태그",
     "directory": "디렉터리",
     "local_timeline": "로컬 타임라인",
-    "federated_timeline": "연합 타임라인"
+    "federated_timeline": "연합 타임라인",
+    "main_navigation": "주 탐색",
+    "mobile_navigation": "모바일 탐색",
+    "social_timeline": "소셜 타임라인"
   },
   "explore": {
     "trending": "트렌딩",
@@ -181,7 +198,11 @@
   "status": {
     "reply": "답글",
     "boost": "부스트",
+    "unboost": "부스트 취소",
+    "quote": "인용",
     "favourite": "좋아요",
+    "unfavourite": "좋아요 취소",
+    "react": "이모지로 반응",
     "bookmark": "북마크",
     "share": "공유",
     "copyLink": "링크 복사",
@@ -216,7 +237,13 @@
     "visibility_direct": "다이렉트 메시지",
     "report": "신고",
     "reblogged": "부스트했습니다",
-    "cannot_boost": "이 게시물은 부스트할 수 없습니다"
+    "cannot_boost": "이 게시물은 부스트할 수 없습니다",
+    "cannot_quote": "이 게시물은 인용할 수 없습니다",
+    "cannot_quote_visibility": "공개 또는 비목록 게시물만 인용할 수 있습니다",
+    "cannot_quote_policy_nobody": "작성자가 이 게시물의 인용을 허용하지 않았습니다",
+    "cannot_quote_followers_only": "작성자의 팔로워만 이 게시물을 인용할 수 있습니다",
+    "cannot_quote_following_only": "작성자가 팔로우하는 사용자만 이 게시물을 인용할 수 있습니다",
+    "cannot_quote_login_required": "로그인한 팔로워만 이 게시물을 인용할 수 있습니다"
   },
   "notification": {
     "title": "알림",
@@ -364,6 +391,14 @@
     "posting": "게시",
     "posting_default_visibility": "기본 게시물 공개 범위",
     "posting_default_visibility_desc": "새 게시물은 기본적으로 이 공개 범위를 사용합니다. 스레드에 답글을 달 때는 상위 게시물의 공개 범위 이하로 제한됩니다.",
+    "default_quote_policy": "기본 인용 정책",
+    "default_quote_policy_desc": "새 게시물이 다른 사람에게 인용될 수 있는 기본 범위를 설정합니다.",
+    "quote_policy_public": "모두 허용",
+    "quote_policy_public_desc": "누구나 이 게시물을 인용할 수 있습니다.",
+    "quote_policy_followers": "팔로워만",
+    "quote_policy_followers_desc": "나를 팔로우하는 사용자만 이 게시물을 인용할 수 있습니다.",
+    "quote_policy_nobody": "허용 안 함",
+    "quote_policy_nobody_desc": "나를 제외한 사용자는 이 게시물을 인용할 수 없습니다.",
     "posting_visibility_saved": "기본 공개 범위가 저장되었습니다.",
     "columns": "컬럼",
     "columns_desc": "넓은 화면에서 홈 타임라인 옆에 표시할 컬럼을 선택하세요.",
@@ -406,7 +441,26 @@
       "detail": "인스턴스 상세",
       "registrations": "가입 허용",
       "first_seen": "최초 발견",
-      "description": "설명"
+      "description": "설명",
+      "dlq": {
+        "title": "실패 메시지 (DLQ)",
+        "link": "실패 메시지",
+        "description": "재시도를 모두 소진한 연합 메시지입니다. 재전송은 연합 큐에 다시 넣고, 폐기는 처리 완료로 표시합니다.",
+        "parked": "보관됨",
+        "replayed": "재전송됨",
+        "discarded": "폐기됨",
+        "activity": "활동",
+        "actor": "행위자",
+        "error": "오류",
+        "attempts": "시도 횟수",
+        "parked_at": "보관 시각",
+        "message_type": "메시지 유형",
+        "body": "메시지 본문",
+        "replay": "재전송",
+        "discard": "폐기",
+        "discard_confirm": "이 메시지를 폐기할까요? 다시 처리되지 않습니다.",
+        "empty": "메시지가 없습니다"
+      }
     },
     "domainBlocks": "도메인 차단",
     "emailDomainBlocks": "이메일 도메인 차단",
@@ -679,9 +733,13 @@
       "terms_of_service": "이용약관",
       "terms_of_service_desc": "마크다운으로 이용약관을 작성하세요.",
       "privacy_policy": "개인정보처리방침",
-      "privacy_policy_desc": "마크다운으로 개인정보처리방침을 작성하세요."
+      "privacy_policy_desc": "마크다운으로 개인정보처리방침을 작성하세요.",
+      "accent_color": "Deck 강조 색상"
     },
-    "registration_message_help": "이 메시지는 가입 페이지에서 사용자에게 표시됩니다."
+    "registration_message_help": "이 메시지는 가입 페이지에서 사용자에게 표시됩니다.",
+    "vapid_public_key_placeholder": "Base64url로 인코딩된 P-256 공개 키 (65바이트)",
+    "vapid_private_key_placeholder": "Base64url로 인코딩된 P-256 개인 키 (32바이트)",
+    "accent_color_hint": "모든 방문자의 Deck UI(버튼, 활성 상태, 라이브 표시)에 적용됩니다."
   },
   "legal": {
     "terms_of_service": "이용약관",
@@ -818,7 +876,8 @@
     "backup_codes_description": "이 백업 코드를 안전한 곳에 저장하세요. 각 코드는 한 번만 사용할 수 있습니다.",
     "backup_codes_warning": "이 코드는 다시 표시되지 않습니다.",
     "invalid_code": "잘못된 코드입니다. 다시 시도하세요.",
-    "copied": "복사됨!"
+    "copied": "복사됨!",
+    "qr_alt": "TOTP QR 코드"
   },
   "turnstile": {
     "title": "Turnstile (CAPTCHA)",
@@ -916,6 +975,273 @@
       "write:reports": "신고 제출",
       "admin:read": "관리자 데이터 보기",
       "admin:write": "관리자 데이터 수정"
+    }
+  },
+  "design": {
+    "classicBanner": "클래식 디자인을 보고 있습니다",
+    "switchToNew": "새로운 디자인 사용해 보기",
+    "backToClassic": "클래식 디자인",
+    "auroraBanner": "Aurora 디자인을 보고 있습니다."
+  },
+  "setup": {
+    "subtitle": "첫 관리자 계정을 생성합니다.",
+    "unavailable": "이미 사용자가 생성되어 초기 설정을 사용할 수 없습니다.",
+    "admin_username": "관리자 사용자 이름",
+    "admin_email": "관리자 이메일",
+    "password": "비밀번호",
+    "confirm_password": "비밀번호 확인",
+    "create": "관리자 생성",
+    "creating": "생성 중...",
+    "create_failed": "관리자 생성에 실패했습니다.",
+    "username_required": "사용자 이름을 입력해 주세요.",
+    "username_invalid": "사용자 이름은 영문, 숫자, 밑줄만 사용할 수 있습니다.",
+    "email_required": "이메일을 입력해 주세요.",
+    "password_required": "비밀번호를 입력해 주세요.",
+    "password_too_short": "비밀번호는 8자 이상이어야 합니다.",
+    "password_mismatch": "비밀번호 확인이 일치하지 않습니다."
+  },
+  "deck": {
+    "col_home": "홈",
+    "col_local": "로컬",
+    "col_federated": "연합",
+    "scope_following": "팔로잉",
+    "scope_federated": "연합 네트워크",
+    "live": "LIVE",
+    "streaming": "스트리밍",
+    "note": "노트",
+    "columns_empty": "모든 컬럼이 숨겨져 있습니다. 왼쪽 레일에서 타임라인을 다시 켜세요.",
+    "toggle_column": "{name} 컬럼 표시/숨기기",
+    "design_aurora": "Aurora UI",
+    "design_classic": "클래식 UI",
+    "deck": "덱",
+    "columns_short": "컬럼",
+    "columns_title": "덱 컬럼",
+    "col_notifications": "알림",
+    "move_up": "위로 이동",
+    "move_down": "아래로 이동",
+    "drag_to_reorder": "끌어서 순서 변경",
+    "live_toggle": "실시간 업데이트 켜기/끄기",
+    "react": "이모지로 반응",
+    "unboost": "부스트 취소",
+    "unfavourite": "즐겨찾기 해제",
+    "remote_reaction_hint": "다른 서버의 이모지",
+    "col_search": "검색",
+    "col_requests": "팔로우 요청",
+    "unbookmark": "북마크 삭제",
+    "col_social": "소셜",
+    "scope_social": "홈 + 로컬",
+    "scope_alerts": "활동",
+    "scope_requests": "팔로우 요청",
+    "scope_search": "전체",
+    "nav_home": "홈",
+    "nav_social": "소셜",
+    "nav_local": "로컬",
+    "nav_federated": "연합",
+    "nav_alerts": "알림",
+    "nav_requests": "팔로우 요청",
+    "section_timelines": "타임라인"
+  },
+  "airport": {
+    "pageTitle": "{name} 공항 — 이 서버의 실시간 지도",
+    "title": "{name} 공항",
+    "subtitle": "이 서버의 지난 24시간을 실제로 돌아가는 공항으로 그렸어요. 모든 경로는 실제 배선과 일치하고, 숫자는 전부 진짜예요.",
+    "asOf": "{time} 기준",
+    "status": {
+      "live": "실시간",
+      "lastKnown": "마지막 값",
+      "connecting": "연결 중"
+    },
+    "sceneLabel": "서버 파이프라인을 나타낸 실시간 공항 시뮬레이션",
+    "cards": {
+      "departures": "출발 승객",
+      "arrivals": "도착 승객",
+      "transfers": "환승",
+      "cargoOut": "화물 출발",
+      "cargoIn": "화물 도착",
+      "passports": "여권 발급",
+      "items": "{count}개"
+    },
+    "scene": {
+      "sky": "연합 하늘",
+      "runwayDep": "출발 활주로",
+      "runwayDepSub": "(연합 발신)",
+      "runwayArr": "도착 활주로",
+      "runwayArrSub": "(inbox)",
+      "tower": "관제탑",
+      "towerSub": "(운영 · 큐)",
+      "towerLine": "이착륙 {movements}회 · DLQ {dlq}",
+      "dlqClear": "없음",
+      "cargo": "화물터미널 (R2)",
+      "cargoSub": "벨리 카고 · 미디어",
+      "city": "시내",
+      "landsideDep": "출발 · 랜드사이드",
+      "landsideArr": "도착 · 랜드사이드",
+      "cloudflare": "Cloudflare 게이트",
+      "checkin": "체크인",
+      "security": "보안검색",
+      "passport": "여권 심사",
+      "boarding": "탑승 ↑",
+      "arrivalsDown": "↓ 도착",
+      "announce": "안내 방송",
+      "announceSub": "(스트리밍)",
+      "today": "오늘",
+      "exit": "출구",
+      "baggage": "짐 찾기",
+      "immigration": "입국심사",
+      "immigrationSub": "(서명)",
+      "dlqHolding": "DLQ 대기 계류장",
+      "gateA1": "A1 · 출발",
+      "gateA2": "A2 · 도착"
+    },
+    "info": {
+      "default": {
+        "title": "{name} 공항",
+        "body": "이 지도의 모든 시설은 이 서버 연합 파이프라인의 실제 구성요소예요. 마우스를 올리면 어떤 부분인지 알려드려요.",
+        "stat": "24시간 · 실시간"
+      },
+      "cloudflare": {
+        "title": "Cloudflare 게이트",
+        "body": "엣지예요. 연합우주와 브라우저에서 오는 모든 HTTP 요청이 Cloudflare 네트워크를 거쳐 가장 먼저 여기로 들어와요.",
+        "stat": "엣지"
+      },
+      "checkin": {
+        "title": "체크인",
+        "body": "레이트 리미터예요. 한 클라이언트가 API를 두드릴 수 있는 빈도를 제한해서, 폭주가 서버를 덮치지 않게 해요.",
+        "stat": "레이트 리밋"
+      },
+      "security": {
+        "title": "보안검색",
+        "body": "봇 방어(Turnstile)예요. AI 크롤러와 스팸 봇은 여기서 돌려보내고, 진짜 사람은 그대로 통과해요.",
+        "stat": "봇 차단"
+      },
+      "passport": {
+        "title": "여권 심사",
+        "body": "인증이에요. 로그인 세션이나 앱의 OAuth 토큰을 여기서 확인한 뒤에야 서버에 쓰기가 가능해요.",
+        "stat": "인증"
+      },
+      "gate": {
+        "title": "항공기 스탠드",
+        "body": "연합 큐예요. 방금 발행된 글이 배달 작업(QUEUE_FEDERATION)으로 여기서 대기하다가, 큐 소비자가 실어 날라요.",
+        "stat": "큐"
+      },
+      "immigration": {
+        "title": "입국심사",
+        "body": "인바운드 HTTP 서명 검증이에요. inbox에 도착한 모든 액티비티가 정말 그 서버에서 왔는지 여기서 확인해요.",
+        "stat": "{arrivals}명 통과"
+      },
+      "baggage": {
+        "title": "짐 찾기",
+        "body": "원격 미디어예요. 연합 글에 실려 온 첨부파일을 미디어 프록시가 받아와서 보여줘요.",
+        "stat": "첨부파일"
+      },
+      "exit": {
+        "title": "출구",
+        "body": "타임라인이에요. 검증을 마친 원격 글이 파이프라인을 벗어나 로컬 피드에 등장하는 지점이에요.",
+        "stat": "타임라인"
+      },
+      "cargo": {
+        "title": "화물터미널 (R2)",
+        "body": "오브젝트 스토리지(R2 MEDIA_BUCKET)예요. 업로드된 이미지·영상·오디오가 전부 여기 살아요 — 미디어는 글 본문과 함께 이동하지 않아요.",
+        "stat": "도착 {cargoIn} · 출발 {cargoOut}"
+      },
+      "announce": {
+        "title": "안내 방송 (스트리밍)",
+        "body": "스트리밍 서비스(Durable Object)예요. 접속 중인 모든 클라이언트에 WebSocket으로 새 글과 알림을 실시간으로 밀어 보내요.",
+        "stat": "오늘 {announceN}건"
+      },
+      "tower": {
+        "title": "관제탑 (운영)",
+        "body": "큐 소비자(queue-consumer) 워커예요. 연합 큐를 순서대로 처리하면서 액티비티에 서명해 배달하고, 서버별 성공·실패를 기록해요.",
+        "stat": "이착륙 {movements}회"
+      },
+      "dlq": {
+        "title": "DLQ 대기 계류장",
+        "body": "데드레터 보관소(federation_dlq_parked)예요. 재시도를 모두 소진한 배달이 여기 서서 관리자의 재발송이나 정리를 기다려요 — 빨간불은 무언가 착륙하지 못하고 있다는 뜻이에요.",
+        "statEmpty": "비어 있음 · 좋아요",
+        "statWaiting": "{dlq}건 대기"
+      },
+      "deprwy": {
+        "title": "출발 활주로 09L",
+        "body": "연합 발신이에요. 큐 소비자가 ActivityPub 액티비티에 서명해서 상대 서버의 inbox로 직접 POST해요 — Cloudflare를 되돌아가지 않고 곧장 나가요.",
+        "stat": "{departures}편 출발"
+      },
+      "arrrwy": {
+        "title": "도착 활주로 09R",
+        "body": "연합 수신 — 이 서버의 공용 inbox예요. 다른 서버가 보낸 액티비티가 여기로 착륙해요.",
+        "stat": "{arrivals}편 착륙"
+      },
+      "beaconBody": "이 서버와 연합하는 다른 페디버스 서버예요. 비콘 크기는 지난 24시간 동안 그곳에서 도착한 글의 양이에요.",
+      "beaconStat": "{count}건 도착"
+    },
+    "ops": {
+      "title": "운행 상황",
+      "gate": {
+        "title": "정문·여객터미널",
+        "status": "운영 중",
+        "desc": "나와 {title}을(를) 잇는 정문이에요. 이 페이지도 이 문을 지나 여기까지 왔어요. 새 글(출발 승객), 지난 하루 {departures}명."
+      },
+      "federation": {
+        "title": "국제선 (연합 노선)",
+        "statusOk": "운항 중",
+        "statusDelayed": "일부 지연",
+        "desc": "지난 하루 {arrivals}명이 {destinations}곳의 공항에서 도착했어요. 새 글은 여기서 연합 하늘로 출발 수속을 밟아요.",
+        "delayedNote": "아래 노선에 배달 실패가 쌓여 있어요:",
+        "failures": "배달 실패 {count}회"
+      },
+      "transfer": {
+        "title": "환승 통로",
+        "status": "운영 중",
+        "desc": "지난 하루 {transfers}명이 도착 후 환승 통로를 지나 다시 출발편에 올랐어요. 부스트가 이 통로를 써요."
+      },
+      "cargo": {
+        "title": "화물터미널 (R2)",
+        "status": "가동 중",
+        "desc": "지난 하루 위탁 화물 {out}개({bytes})가 창고로 들어갔고, 도착 화물 {in}개가 짐 찾는 곳에 나왔어요."
+      },
+      "passport": {
+        "title": "여권 데스크",
+        "status": "운영 중",
+        "desc": "지난 하루 {count}명이 새 여권을 발급받았어요. 새 계정이 곧 새 여권이에요."
+      },
+      "tower": {
+        "title": "관제탑 방송",
+        "status": "방송 중",
+        "desc": "새 글이 생기면 접속 중인 화면으로 곧바로 안내 방송을 해요. 지난 하루 방송 거리는 {total}건이었어요."
+      },
+      "dlq": {
+        "title": "결항 화물 보관소",
+        "statusEmpty": "비어 있음",
+        "statusParked": "결항 {count}건",
+        "emptyDesc": "보관소는 텅 비어 있어요. 좋은 일이에요.",
+        "parkedDesc": "{count}건의 화물이 끝내 배달되지 못하고 보관소에 서 있어요. 관리자 화면에서 재발송하거나 정리할 수 있어요."
+      }
+    },
+    "story": {
+      "title": "공항은 이렇게 돌아가요",
+      "p1": {
+        "lead": "모든 시설이 실제 구성요소예요.",
+        "body": "이 지도는 서버의 실제 파이프라인을 공항으로 그린 거예요. 실제 배선에 없는 시설은 그리지 않았고, 실제로 있는 경로는 빠짐없이 그렸어요. 비행기는 분위기지만, 숫자는 아니에요."
+      },
+      "p2": {
+        "lead": "랜드사이드는 요청 파이프라인이에요.",
+        "body": "모든 요청은 Cloudflare 엣지로 들어와 레이트 리미터(체크인), 봇 방어(보안검색), 인증(여권 심사)을 차례로 지나야 뭔가를 할 수 있어요 — 실제 미들웨어와 순서까지 같아요."
+      },
+      "p3": {
+        "lead": "화물은 미디어예요.",
+        "body": "이미지와 영상은 글 안에 실려 다니지 않아요. R2 오브젝트 스토리지(화물터미널)에 살면서 따로 움직여요 — 나갈 때는 업로드로, 들어올 때는 미디어 프록시로 받아와요."
+      },
+      "p4": {
+        "lead": "도착은 연합 수신이에요.",
+        "body": "다른 서버의 글은 공용 inbox(09R)에 착륙해서 HTTP 서명 검증(입국심사)을 통과한 뒤에야 로컬 타임라인(출구)에 들어와요."
+      },
+      "p5": {
+        "lead": "안내 방송은 스트리밍 서비스예요.",
+        "body": "Durable Object 하나가 열려 있는 모든 클라이언트와 WebSocket을 붙들고, 새 글과 알림을 생기는 즉시 밀어 보내요."
+      },
+      "p6": {
+        "lead": "관제탑과 DLQ.",
+        "body": "관제탑은 큐 소비자예요. 연합 큐를 순서대로 처리하고 서버별 배달 성공·실패를 기록해요. 재시도를 모두 소진한 배달은 데드레터 테이블(DLQ 대기 계류장)에 서서 관리자의 재발송을 기다려요. 숫자는 약 1분마다 갱신되고, 계정·수신자·본문은 포함되지 않아요."
+      }
     }
   }
 }

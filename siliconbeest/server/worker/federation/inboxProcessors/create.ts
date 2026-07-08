@@ -13,24 +13,89 @@ import type { StatusWithJoinedAccountRow } from '../../types/db';
 import { generateUlid } from '../../utils/ulid';
 import { sanitizeHtml } from '../../utils/sanitize';
 import { BaseProcessor } from './BaseProcessor';
+import { getQuoteUri, verifyQuoteAuthorization } from '../helpers/quote';
+import { customEmojiTagDomain, emojiTagToCustomEmoji } from '../../../../../packages/shared/utils/customEmoji';
+import { parseQuotePolicyDetailsFromInteractionPolicy } from '../../../../../packages/shared/utils/quotePolicy';
+
+interface CreateProcessorOptions {
+	fanout?: boolean;
+	notify?: boolean;
+}
 
 /**
  * Determine visibility from the Note's to/cc fields.
  */
 function resolveVisibility(note: APObject): string {
-	const publicNs = 'https://www.w3.org/ns/activitystreams#Public';
-	const toArr = Array.isArray(note.to) ? note.to : note.to ? [note.to] : [];
-	const ccArr = Array.isArray(note.cc) ? note.cc : note.cc ? [note.cc] : [];
+	const toArr = idsFrom(note.to);
+	const ccArr = idsFrom(note.cc);
 
-	if (toArr.includes(publicNs)) return 'public';
-	if (ccArr.includes(publicNs)) return 'unlisted';
+	if (toArr.some(isPublicCollection)) return 'public';
+	if (ccArr.some(isPublicCollection)) return 'unlisted';
 	if (toArr.some((t) => t.endsWith('/followers'))) return 'private';
 	console.warn(`[create] Could not determine visibility for note ${note.id}, defaulting to 'direct'`);
 	return 'direct';
 }
 
+function idsFrom(value: unknown): string[] {
+	if (!value) return [];
+	if (typeof value === 'string') return [value];
+	if (value instanceof URL) return [value.href];
+	if (Array.isArray(value)) return value.flatMap(idsFrom);
+	if (typeof value === 'object') {
+		const obj = value as Record<string, unknown>;
+		return idsFrom(obj.id).concat(idsFrom(obj['@id'])).concat(idsFrom(obj.href));
+	}
+	return [];
+}
+
+function isPublicCollection(value: string): boolean {
+	return value === 'https://www.w3.org/ns/activitystreams#Public'
+		|| value === 'as:Public'
+		|| value === 'Public';
+}
+
+function firstString(value: unknown): string {
+	if (typeof value === 'string') return value;
+	if (Array.isArray(value)) {
+		for (const item of value) {
+			const found = firstString(item);
+			if (found) return found;
+		}
+		return '';
+	}
+	if (value && typeof value === 'object') {
+		for (const item of Object.values(value as Record<string, unknown>)) {
+			const found = firstString(item);
+			if (found) return found;
+		}
+	}
+	return '';
+}
+
+function firstLanguage(map: unknown): string | null {
+	if (!map || typeof map !== 'object' || Array.isArray(map)) return null;
+	const [language] = Object.keys(map as Record<string, unknown>);
+	return language || null;
+}
+
+function firstUrl(value: unknown): string | null {
+	if (typeof value === 'string') return value;
+	if (value instanceof URL) return value.href;
+	if (Array.isArray(value)) {
+		for (const item of value) {
+			const found = firstUrl(item);
+			if (found) return found;
+		}
+	}
+	if (value && typeof value === 'object') {
+		const obj = value as Record<string, unknown>;
+		return firstUrl(obj.href) ?? firstUrl(obj.id) ?? firstUrl(obj.url);
+	}
+	return null;
+}
+
 class CreateProcessor extends BaseProcessor {
-	async process(activity: APActivity): Promise<void> {
+	async process(activity: APActivity, options: CreateProcessorOptions = {}): Promise<void> {
 		const object = activity.object;
 		if (!object || typeof object === 'string') {
 			console.warn('[create] activity.object is missing or a bare URI');
@@ -115,17 +180,46 @@ class CreateProcessor extends BaseProcessor {
 		}
 
 		// Resolve content
-		const rawContent = note.content ?? (apNote._misskey_content ? apNote._misskey_content : '');
+		const rawContent = firstString(note.content)
+			|| firstString((apNote as Record<string, unknown>).contentMap)
+			|| firstString(apNote._misskey_content);
 		const noteContent = sanitizeHtml(rawContent);
-		const rawCw = note.summary ?? (apNote._misskey_summary ? apNote._misskey_summary : '');
+		const rawCw = firstString(note.summary)
+			|| firstString((apNote as Record<string, unknown>).summaryMap)
+			|| firstString(apNote._misskey_summary);
 		const contentWarning = sanitizeHtml(rawCw);
+		const language = firstLanguage((apNote as Record<string, unknown>).contentMap) ?? 'en';
+		const statusUrl = firstUrl(note.url) ?? note.id;
 
-		// FEP-e232: Resolve quote post URI
-		const quoteUri = apNote.quoteUri || apNote._misskey_quote || null;
+		// FEP-044f + fallback implementations: Resolve quote post URI
+		const quoteUri = getQuoteUri(apNote) || apNote.quoteUri || apNote._misskey_quote || null;
 		let quoteId: string | null = null;
+		let quoteAuthorizationUri: string | null = null;
+		let quoteApprovalStatus = 'none';
 		if (quoteUri) {
 			const quotedStatus = await this.statusRepo.findByUri(quoteUri);
-			if (quotedStatus) quoteId = quotedStatus.id;
+			if (quotedStatus) {
+				const targetAuthor = await env.DB.prepare(
+					'SELECT uri FROM accounts WHERE id = ?1 LIMIT 1',
+				).bind(quotedStatus.account_id).first<{ uri: string }>();
+				const selfQuote = targetAuthor?.uri === activity.actor;
+				const candidateAuthorization = typeof apNote.quoteAuthorization === 'string'
+					? apNote.quoteAuthorization
+					: null;
+				const authorized = selfQuote || await verifyQuoteAuthorization({
+					authorizationUri: candidateAuthorization,
+					interactingObjectUri: note.id,
+					interactionTargetUri: quoteUri,
+					targetAttributedTo: targetAuthor?.uri ?? '',
+				});
+				if (authorized) {
+					quoteId = quotedStatus.id;
+					quoteAuthorizationUri = candidateAuthorization;
+					quoteApprovalStatus = selfQuote ? 'accepted' : 'accepted';
+				} else {
+					quoteApprovalStatus = candidateAuthorization ? 'invalid' : 'missing';
+				}
+			}
 		}
 
 		// Extract emoji tags for db column
@@ -133,31 +227,46 @@ class CreateProcessor extends BaseProcessor {
 		const emojiTagsForDb = rawTags
 			.filter((t) => t.type === 'Emoji')
 			.map((et) => {
-				const name = (et.name || '').replace(/^:|:$/g, '');
-				const iconObj = et.icon;
-				return name && iconObj?.url ? { shortcode: name, url: iconObj.url, static_url: iconObj.url } : null;
+				const emoji = emojiTagToCustomEmoji(et as unknown as Record<string, unknown>);
+				return emoji ? { shortcode: emoji.shortcode, url: emoji.url, static_url: emoji.static_url } : null;
 			})
 			.filter(Boolean);
-		const emojiTagsJson = emojiTagsForDb.length > 0 ? JSON.stringify(emojiTagsForDb) : null;
+			const emojiTagsJson = emojiTagsForDb.length > 0 ? JSON.stringify(emojiTagsForDb) : null;
+			const interactionPolicy = (apNote as Record<string, unknown>).interactionPolicy;
+			const quotePolicyDetails = parseQuotePolicyDetailsFromInteractionPolicy(
+				interactionPolicy,
+				activity.actor,
+				`${activity.actor}/followers`,
+			);
+			const quotePolicy = quotePolicyDetails.policy;
+			const automaticApprovalsJson = interactionPolicy !== undefined
+				? JSON.stringify(quotePolicyDetails.automaticApprovals)
+				: null;
+			const manualApprovalsJson = interactionPolicy !== undefined
+				? JSON.stringify(quotePolicyDetails.manualApprovals)
+				: null;
 
-		// Insert the status
-		await env.DB.prepare(
-			`INSERT INTO statuses
-			 (id, uri, url, account_id, in_reply_to_id, in_reply_to_account_id,
-			  content, content_warning, visibility, sensitive, language,
-			  conversation_id, local, reply, quote_id, emoji_tags, created_at, updated_at)
-			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, ?14, ?15, ?16, ?17)`,
-		)
+			// Insert the status
+			await env.DB.prepare(
+				`INSERT INTO statuses
+				 (id, uri, url, account_id, in_reply_to_id, in_reply_to_account_id,
+				  content, content_warning, visibility, sensitive, language,
+				  conversation_id, local, reply, quote_id, quote_authorization_uri, quote_approval_status,
+				  quote_policy, quote_policy_automatic_approvals, quote_policy_manual_approvals,
+				  emoji_tags, created_at, updated_at)
+				 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)`,
+			)
 			.bind(
 				statusId, note.id,
-				typeof note.url === 'string' ? note.url : note.id,
+				statusUrl,
 				authorAccountId, inReplyToId, inReplyToAccountId,
 				noteContent, contentWarning, visibility,
-				note.sensitive ? 1 : 0, 'en', conversationId,
-				inReplyToId ? 1 : 0, quoteId, emojiTagsJson,
+				note.sensitive ? 1 : 0, language, conversationId,
+				inReplyToId ? 1 : 0, quoteId, quoteAuthorizationUri, quoteApprovalStatus,
+				quotePolicy, automaticApprovalsJson, manualApprovalsJson, emojiTagsJson,
 				note.published ? new Date(note.published).toISOString() : now, now,
 			)
-			.run();
+				.run();
 
 		// Process poll data if this is a Question
 		if (note.type === 'Question') {
@@ -174,19 +283,21 @@ class CreateProcessor extends BaseProcessor {
 
 		// Process mentions, hashtags, emojis from tags
 		const tags: APTag[] = Array.isArray(note.tag) ? note.tag : note.tag ? [note.tag as APTag] : [];
-		await this.processMentions(tags, statusId, authorAccountId, now);
+		await this.processMentions(tags, statusId, authorAccountId, now, options.notify !== false);
 		await this.processHashtags(tags, statusId, now);
 		await this.processEmojis(tags, activity.actor, now);
 
 		// Fan out to local followers' home timelines
-		if (visibility !== 'direct') {
-			await env.QUEUE_INTERNAL.send({
-				type: 'timeline_fanout',
-				statusId,
-				accountId: authorAccountId,
-			});
-		} else {
-			await this.fanoutDM(statusId, authorAccountId, now);
+		if (options.fanout !== false) {
+			if (visibility !== 'direct') {
+				await env.QUEUE_INTERNAL.send({
+					type: 'timeline_fanout',
+					statusId,
+					accountId: authorAccountId,
+				});
+			} else {
+				await this.fanoutDM(statusId, authorAccountId, now);
+			}
 		}
 	}
 
@@ -333,6 +444,7 @@ class CreateProcessor extends BaseProcessor {
 		statusId: string,
 		authorAccountId: string,
 		now: string,
+		notify = true,
 	): Promise<void> {
 		const mentionTags = tags.filter((t) => t.type === 'Mention');
 		for (const mention of mentionTags) {
@@ -351,7 +463,9 @@ class CreateProcessor extends BaseProcessor {
 					// duplicate mention
 				}
 
-				await this.notify('mention', mentionedAccount.id, authorAccountId, statusId);
+				if (notify) {
+					await this.notify('mention', mentionedAccount.id, authorAccountId, statusId);
+				}
 			}
 		}
 	}
@@ -389,24 +503,22 @@ class CreateProcessor extends BaseProcessor {
 		actorUri: string,
 		now: string,
 	): Promise<void> {
-		const actorServerDomain = new URL(actorUri).hostname;
 		const emojiTags = tags.filter((t) => t.type === 'Emoji');
 		const newEmojis: Array<{ shortcode: string; url: string; static_url: string; domain: string }> = [];
 
 		for (const et of emojiTags) {
-			const emojiName = ((et.name as string) || '').replace(/^:|:$/g, '');
-			const emojiUrl = et.icon?.url;
-			if (!emojiName || !emojiUrl) continue;
-			const emojiDomain = actorServerDomain;
+			const emoji = emojiTagToCustomEmoji(et as unknown as Record<string, unknown>);
+			if (!emoji) continue;
+			const emojiDomain = customEmojiTagDomain(et as unknown as Record<string, unknown>, actorUri);
 			if (!emojiDomain) continue;
 			try {
 				const result = await env.DB.prepare(
 					`INSERT INTO custom_emojis (id, shortcode, domain, image_key, visible_in_picker, created_at, updated_at)
 					 VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5)
 					 ON CONFLICT(shortcode, domain) DO UPDATE SET image_key = excluded.image_key, updated_at = excluded.updated_at`,
-				).bind(generateUlid(), emojiName, emojiDomain, emojiUrl, now).run();
+				).bind(generateUlid(), emoji.shortcode, emojiDomain, emoji.url, now).run();
 				if (result.meta.changes > 0) {
-					newEmojis.push({ shortcode: emojiName, url: emojiUrl, static_url: emojiUrl, domain: emojiDomain });
+					newEmojis.push({ shortcode: emoji.shortcode, url: emoji.url, static_url: emoji.static_url, domain: emojiDomain });
 				}
 			} catch {
 				// ignore
@@ -516,7 +628,8 @@ class CreateProcessor extends BaseProcessor {
 
 export async function processCreate(
 	activity: APActivity,
-	localAccountId: string,
+	localAccountId: string | null,
+	options: CreateProcessorOptions = {},
 ): Promise<void> {
-	await new CreateProcessor(localAccountId).process(activity);
+	await new CreateProcessor(localAccountId).process(activity, options);
 }

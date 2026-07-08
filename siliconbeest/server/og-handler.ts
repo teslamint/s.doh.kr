@@ -115,8 +115,8 @@ export function generateOgHtml(opts: OgOptions): string {
   <meta name="description" content="${descEsc}" />
   <meta property="og:title" content="${titleEsc}" />
   <meta property="og:description" content="${descEsc}" />
-  <meta property="og:url" content="${url}" />
-  <meta property="og:type" content="${type}" />
+  <meta property="og:url" content="${escapeAttr(url)}" />
+  <meta property="og:type" content="${escapeAttr(type)}" />
   <meta property="og:site_name" content="${escapeAttr(siteName)}" />
   ${image ? `<meta property="og:image" content="${escapeAttr(image)}" />` : ''}
   <meta name="twitter:card" content="${image ? 'summary_large_image' : 'summary'}" />
@@ -162,10 +162,10 @@ export async function handleOgRequest(url: URL): Promise<Response | null> {
 
   // Fetch instance info (used by all page types as fallback and for siteName)
   const instanceData = await fetchApi(domain, '/api/v2/instance');
-  const siteName: string = instanceData?.title || 'SiliconBeest';
+  const siteName: string = instanceData?.title || domain;
   const siteDescription: string =
     stripHtml(instanceData?.description || instanceData?.short_description || '') ||
-    'A Mastodon-compatible social network';
+    domain;
   const siteThumbnail: string | undefined = instanceData?.thumbnail?.url;
 
   if (page.type === 'status') {

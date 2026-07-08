@@ -66,6 +66,7 @@ export type UserRow = {
   readonly current_sign_in_ip: string | null;
   readonly last_sign_in_ip: string | null;
   readonly chosen_languages: string | null;
+  readonly default_quote_policy?: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 };
@@ -107,6 +108,16 @@ export type StatusRow = {
   readonly poll_id: string | null;
   /** FEP-e232: ID of the status being quoted (quote post) */
   readonly quote_id: string | null;
+  /** FEP-044f: URI of the approval stamp for this quote post. */
+  readonly quote_authorization_uri?: string | null;
+  /** FEP-044f: none | pending | accepted | rejected | revoked. */
+  readonly quote_approval_status?: string | null;
+  /** FEP-044f: URI of the QuoteRequest activity sent for this quote post. */
+  readonly quote_request_uri?: string | null;
+  /** FEP-044f: public | followers | nobody. */
+  readonly quote_policy?: string | null;
+  readonly quote_policy_automatic_approvals?: string | null;
+  readonly quote_policy_manual_approvals?: string | null;
   /** JSON array of emoji tag objects from ActivityPub for lazy-load rendering */
   readonly emoji_tags: string | null;
   readonly created_at: string;

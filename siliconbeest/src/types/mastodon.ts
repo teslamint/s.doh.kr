@@ -79,9 +79,11 @@ export interface AccountSource {
   note: string;
   fields: AccountField[];
   follow_requests_count: number;
+  quote_policy?: QuotePolicy;
 }
 
 export type StatusVisibility = 'public' | 'unlisted' | 'private' | 'direct';
+export type QuotePolicy = 'public' | 'followers' | 'nobody';
 
 export interface Status {
   id: string;
@@ -104,6 +106,10 @@ export interface Status {
   in_reply_to_id: string | null;
   in_reply_to_account_id: string | null;
   reblog: Status | null;
+  quote?: Status | null;
+  quote_policy?: QuotePolicy;
+  quote_policy_allows?: boolean;
+  quote_policy_reason?: string | null;
   poll: Poll | null;
   card: PreviewCard | null;
   language: string | null;
@@ -253,6 +259,7 @@ export interface Instance {
   site_landing_markdown?: string;
   terms_of_service?: string;
   privacy_policy?: string;
+  accent_color?: string | null;
 }
 
 export interface InstanceConfiguration {

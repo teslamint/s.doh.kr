@@ -7,6 +7,7 @@ import { useUiStore } from '@/stores/ui';
 import { useNotificationsStore } from '@/stores/notifications';
 import { useComposeStore } from '@/stores/compose';
 import { usePublish, type PublishPayload } from '@/composables/usePublish';
+import { applyAccent } from '@/utils/accent';
 import Modal from '@/components/common/Modal.vue';
 import StatusComposer from '@/components/status/StatusComposer.vue';
 
@@ -55,8 +56,13 @@ onMounted(async () => {
   }
   await Promise.allSettled(promises);
 
+  // Apply the instance accent color for the Deck UI (falls back internally)
+  applyAccent(instance.instance?.accent_color);
+
   // Set dynamic page title
-  document.title = instance.instance?.title || 'SiliconBeest';
+  if (instance.instance?.title) {
+    document.title = instance.instance.title;
+  }
 
   // Set dynamic favicon
   const link = document.querySelector("link[rel='icon']") as HTMLLinkElement;

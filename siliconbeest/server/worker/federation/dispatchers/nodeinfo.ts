@@ -14,12 +14,15 @@ import type { FedifyContextData } from '../fedify';
 import { SILICONBEEST_VERSION } from '../../version';
 import { getInstanceTitle } from '../../services/instance';
 import { env } from 'cloudflare:workers';
+import { getRepositoryUrl } from '../../utils/repository';
 
 const STATS_CACHE_KEY = 'nodeinfo:stats:fedify';
 const STATS_CACHE_TTL = 3600; // 1 hour
 
 interface NodeInfoStats {
-  userCount: number;
+  activeUserCount: number;
+  activeMonthUserCount: number;
+  activeHalfyearUserCount: number;
   statusCount: number;
   domainCount: number;
   localComments: number;
@@ -32,15 +35,32 @@ async function getStats(): Promise<NodeInfoStats> {
   const cached = await env.CACHE.get(STATS_CACHE_KEY, 'json');
   if (cached) return cached as NodeInfoStats;
 
-  const [usersResult, statusesResult, domainsResult, commentsResult] = await Promise.all([
+  const activeMonthSince = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const activeHalfyearSince = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString();
+
+  const [usersResult, activeMonthUserCountResult, activeHalfyearUserCountResult, statusesResult, domainsResult, commentsResult] = await Promise.all([
     env.DB.prepare(`SELECT COUNT(*) AS cnt FROM accounts WHERE domain IS NULL`).first(),
+    env.DB.prepare(
+      `SELECT COUNT(DISTINCT a.id) AS cnt
+       FROM accounts a
+       JOIN users u ON u.account_id = a.id
+       WHERE a.domain IS NULL AND u.current_sign_in_at >= ?1`,
+    ).bind(activeMonthSince).first(),
+    env.DB.prepare(
+      `SELECT COUNT(DISTINCT a.id) AS cnt
+       FROM accounts a
+       JOIN users u ON u.account_id = a.id
+       WHERE a.domain IS NULL AND u.current_sign_in_at >= ?1`,
+    ).bind(activeHalfyearSince).first(),
     env.DB.prepare(`SELECT COUNT(*) AS cnt FROM statuses WHERE deleted_at IS NULL`).first(),
     env.DB.prepare(`SELECT COUNT(DISTINCT domain) AS cnt FROM accounts WHERE domain IS NOT NULL`).first(),
     env.DB.prepare(`SELECT COUNT(*) AS cnt FROM statuses WHERE deleted_at IS NULL AND local = 1 AND reply = 1`).first(),
   ]);
 
   const stats: NodeInfoStats = {
-    userCount: (usersResult?.cnt as number) ?? 0,
+    activeUserCount: (usersResult?.cnt as number) ?? 0,
+    activeMonthUserCount: (activeMonthUserCountResult?.cnt as number) ?? 0,
+    activeHalfyearUserCount: (activeHalfyearUserCountResult?.cnt as number) ?? 0,
     statusCount: (statusesResult?.cnt as number) ?? 0,
     domainCount: (domainsResult?.cnt as number) ?? 0,
     localComments: (commentsResult?.cnt as number) ?? 0,
@@ -65,16 +85,16 @@ export function setupNodeInfoDispatcher(fed: Federation<FedifyContextData>): voi
       software: {
         name: 'siliconbeest',
         version: SILICONBEEST_VERSION,
-        repository: new URL('https://github.com/nicepkg/siliconbeest'),
+        repository: new URL(getRepositoryUrl()),
         homepage: new URL(`https://${env.INSTANCE_DOMAIN}`),
       },
       protocols: ['activitypub'],
       openRegistrations: registrationOpen,
       usage: {
         users: {
-          total: stats.userCount,
-          activeMonth: stats.userCount,
-          activeHalfyear: stats.userCount,
+          total: stats.activeUserCount,
+          activeMonth: stats.activeMonthUserCount,
+          activeHalfyear: stats.activeHalfyearUserCount,
         },
         localPosts: stats.statusCount,
         localComments: stats.localComments,

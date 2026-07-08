@@ -46,6 +46,7 @@ import type {
   FilterRow,
   MarkerRow,
 } from '../types/db';
+import { parseCustomEmojiTagsJson } from '../utils/customEmoji';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -129,22 +130,7 @@ export function serializeAccount(
   // Build account emojis from emoji_tags if not explicitly provided
   let accountEmojis = opts?.emojis ?? [];
   if (accountEmojis.length === 0 && row.emoji_tags) {
-    try {
-      const tags = JSON.parse(row.emoji_tags) as Array<{ shortcode?: string; name?: string; url?: string; static_url?: string }>;
-      // Deduplicate by shortcode to prevent double-replacement in emojify
-      const seen = new Set<string>();
-      accountEmojis = tags.filter((t) => {
-        const sc = t.shortcode || (t.name || '').replace(/^:|:$/g, '');
-        if (seen.has(sc)) return false;
-        seen.add(sc);
-        return true;
-      }).map((t) => ({
-        shortcode: t.shortcode || (t.name || '').replace(/^:|:$/g, ''),
-        url: domain ? proxyUrl(t.url || '', domain) || t.url || '' : t.url || '',
-        static_url: domain ? proxyUrl(t.static_url || t.url || '', domain) || t.static_url || t.url || '' : t.static_url || t.url || '',
-        visible_in_picker: false,
-      }));
-    } catch { /* ignore malformed JSON */ }
+    accountEmojis = parseCustomEmojiTagsJson(row.emoji_tags, domain);
   }
 
   const account: MastodonAccount = {
@@ -193,6 +179,7 @@ export function serializeStatus(
     account: MastodonAccount;
     mediaAttachments?: MastodonMediaAttachment[];
     reblog?: MastodonStatus | null;
+    quote?: MastodonStatus | null;
     poll?: MastodonPoll | null;
     card?: PreviewCard | null;
     favourited?: boolean | null;
@@ -202,8 +189,11 @@ export function serializeStatus(
     mentions?: StatusMention[];
     tags?: MastodonTag[];
     emojis?: Emoji[];
+    quotePolicyAllows?: boolean;
+    quotePolicyReason?: string | null;
   },
 ): MastodonStatus {
+  const quotePolicy = row.quote_policy === 'followers' || row.quote_policy === 'nobody' ? row.quote_policy : 'public';
   return {
     id: row.id,
     uri: row.uri,
@@ -222,6 +212,12 @@ export function serializeStatus(
     in_reply_to_id: row.in_reply_to_id ?? null,
     in_reply_to_account_id: row.in_reply_to_account_id ?? null,
     reblog: opts.reblog ?? null,
+    quote: opts.quote ?? null,
+    quote_policy: quotePolicy,
+    quote_policy_allows: opts.quotePolicyAllows ?? (
+      (row.visibility === 'public' || row.visibility === 'unlisted') && quotePolicy !== 'nobody'
+    ),
+    quote_policy_reason: opts.quotePolicyReason ?? null,
     poll: opts.poll ?? null,
     card: opts.card ?? null,
     language: row.language || null,

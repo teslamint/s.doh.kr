@@ -20,7 +20,7 @@ import { createFed, type FedifyContextData } from './federation/fedify';
 import { setupActorDispatcher } from './federation/dispatchers/actor';
 import { setupNodeInfoDispatcher } from './federation/dispatchers/nodeinfo';
 import { setupCollectionDispatchers } from './federation/dispatchers/collections';
-import { setupObjectDispatchers, handleActivityRequest } from './federation/dispatchers/objects';
+import { setupObjectDispatchers, handleActivityRequest, handleStatusCollectionRequest } from './federation/dispatchers/objects';
 import { setupWorkerInboxListeners } from './federation/listeners/inbox';
 import { getSettings } from './services/instance';
 
@@ -75,6 +75,7 @@ import featuredTags from './endpoints/api/v1/featuredTags';
 import directory from './endpoints/api/v1/directory';
 import userDomainBlocks from './endpoints/api/v1/domainBlocks';
 import endorsements from './endpoints/api/v1/endorsements';
+import setup from './endpoints/api/v1/setup';
 
 // -- Auth --
 import passwords from './endpoints/api/v1/auth/passwords';
@@ -96,6 +97,7 @@ import changePassword from './endpoints/api/v1/accounts/change_password';
 import instanceV1 from './endpoints/api/v1/instance';
 import instancePeers from './endpoints/api/v1/instance/peers';
 import instanceActivity from './endpoints/api/v1/instance/activity';
+import airport from './endpoints/api/airport';
 
 // -- Admin API --
 import admin from './endpoints/api/v1/admin/index';
@@ -294,12 +296,15 @@ app.route('/api/v1/featured_tags', featuredTags);
 app.route('/api/v1/directory', directory);
 app.route('/api/v1/domain_blocks', userDomainBlocks);
 app.route('/api/v1/endorsements', endorsements);
+app.use('/api/v1/setup', createRateLimit(RATE_LIMIT_REGISTRATION));
+app.route('/api/v1/setup', setup);
 app.route('/api/v1/announcements', announcements);
 app.route('/api/v1/instance/peers', instancePeers);
 app.route('/api/v1/instance/activity', instanceActivity);
 app.route('/api/v1/instance', instanceV1);
 app.route('/api/v1/instance/rules', rules);
 app.route('/api/v1/trends', trends);
+app.route('/api/airport', airport);
 app.use('/api/v1/auth/passwords/*', createRateLimit(RATE_LIMIT_AUTH));
 app.route('/api/v1/auth/passwords', passwords);
 app.use('/api/v1/auth/login', createRateLimit(RATE_LIMIT_AUTH));
@@ -336,6 +341,33 @@ app.route('/api/v2/filters', filters);
 // ---------------------------------------------------------------------------
 // ActivityPub
 // ---------------------------------------------------------------------------
+
+app.get('/users/:identifier/statuses/:id', async (c, next) => {
+  const accept = c.req.header('Accept') || '';
+  if (accept.includes('activity+json') || accept.includes('ld+json')) {
+    return next();
+  }
+  return c.redirect(`https://${env.INSTANCE_DOMAIN}/@${c.req.param('identifier')}/${c.req.param('id')}`);
+});
+
+app.get('/users/:identifier/statuses/:id/:collection', async (c) => {
+  const collection = c.req.param('collection');
+  if (collection !== 'replies' && collection !== 'shares' && collection !== 'likes') {
+    return c.notFound();
+  }
+
+  const accept = c.req.header('Accept') || '';
+  if (!accept.includes('activity+json') && !accept.includes('ld+json')) {
+    return c.redirect(`https://${env.INSTANCE_DOMAIN}/@${c.req.param('identifier')}/${c.req.param('id')}`);
+  }
+
+  return handleStatusCollectionRequest(
+    c.req.param('identifier'),
+    c.req.param('id'),
+    collection,
+    c.req.query('page') === 'true',
+  );
+});
 
 app.route('/users', apActor);
 app.route('/actor', apInstanceActor);

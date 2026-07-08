@@ -7,6 +7,8 @@ describe('Router Guards', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     localStorage.removeItem("siliconbeest_token"); localStorage.removeItem("siliconbeest_theme");
+    document.cookie = 'siliconbeest_token=; Path=/; Max-Age=0';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
   });
 
   async function callGuard(guard: any, to: any = { fullPath: '/test' }, from: any = {}) {

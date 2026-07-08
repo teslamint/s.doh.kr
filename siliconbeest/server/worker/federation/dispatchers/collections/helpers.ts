@@ -13,11 +13,44 @@ import {
   Document as APDocument,
   Source,
   Emoji as APEmoji,
+  InteractionPolicy,
+  InteractionRule,
+  Collection,
+  CollectionPage,
 } from '@fedify/vocab';
 import { Temporal } from '@js-temporal/polyfill';
 import type { AccountRow, StatusRow, PollRow } from '../../../types/db';
+import { normalizeQuotePolicy, quotePolicyAutomaticApprovals } from '../../../../../../packages/shared/utils/quotePolicy';
 
 export const AS_PUBLIC = 'https://www.w3.org/ns/activitystreams#Public';
+
+function buildCanQuoteRule(status: StatusRow, actorUri: string): InteractionRule {
+  const policy = normalizeQuotePolicy(status.quote_policy);
+  const values: ConstructorParameters<typeof InteractionRule>[0] = {
+    automaticApprovals: quotePolicyAutomaticApprovals(policy, actorUri, `${actorUri}/followers`)
+      .map((uri) => new URL(uri)),
+  };
+  return new InteractionRule(values);
+}
+
+function buildStatusCollection(uri: string, name: 'replies' | 'shares' | 'likes', totalItems: number): Collection {
+  if (name === 'replies') {
+    const collectionUri = `${uri}/replies`;
+    return new Collection({
+      id: new URL(collectionUri),
+      first: new CollectionPage({
+        id: new URL(`${collectionUri}?page=true`),
+        partOf: new URL(collectionUri),
+        next: new URL(`${collectionUri}?only_other_accounts=true&page=true`),
+      }),
+    });
+  }
+
+  return new Collection({
+    id: new URL(`${uri}/${name}`),
+    totalItems,
+  });
+}
 
 /**
  * Convert an ISO 8601 date string to a Temporal.Instant.
@@ -94,6 +127,7 @@ export function buildFedifyNote(
       }[]
     >;
     replyUriMap: Map<string, string>;
+    quoteUriMap: Map<string, string>;
   },
 ): FedifyNoteResult {
   const actorUri = `https://${domain}/users/${account.username}`;
@@ -137,6 +171,12 @@ export function buildFedifyNote(
     ccs: ccs.map((u) => u),
     sensitive: status.sensitive === 1,
     summary: status.content_warning || null,
+    replies: buildStatusCollection(status.uri, 'replies', status.replies_count ?? 0),
+    shares: buildStatusCollection(status.uri, 'shares', status.reblogs_count ?? 0),
+    likes: buildStatusCollection(status.uri, 'likes', status.favourites_count ?? 0),
+    interactionPolicy: new InteractionPolicy({
+      canQuote: buildCanQuoteRule(status, actorUri),
+    }),
   };
 
   if (replyTarget) {
@@ -156,6 +196,18 @@ export function buildFedifyNote(
       content: status.text,
       mediaType: 'text/plain',
     });
+  }
+
+  if (status.quote_id) {
+    const quoteUri = helpers.quoteUriMap.get(status.quote_id);
+    if (quoteUri) {
+      noteValues.quote = new URL(quoteUri);
+      noteValues.quoteUrl = new URL(quoteUri);
+    }
+  }
+
+  if (status.quote_authorization_uri) {
+    noteValues.quoteAuthorization = new URL(status.quote_authorization_uri);
   }
 
   // Build custom emoji tags from emoji_tags JSON
@@ -196,6 +248,7 @@ export function buildFedifyQuestion(
     convMap: Map<string, string | null>;
     mediaMap: Map<string, { url: string; mediaType: string; description: string; width: number | null; height: number | null; blurhash: string | null; type: string }[]>;
     replyUriMap: Map<string, string>;
+    quoteUriMap: Map<string, string>;
   },
 ): FedifyQuestionResult {
   // Build the base Note first to reuse all shared logic
@@ -204,6 +257,7 @@ export function buildFedifyQuestion(
   // Parse poll options
   const options: Array<{ title: string; votes_count: number }> = JSON.parse(poll.options);
   const optionNotes = options.map((o) => new Note({ name: o.title }));
+  const actorUri = `https://${domain}/users/${account.username}`;
 
   // Build Question values from the Note's JSON-LD-compatible properties
   const questionValues: ConstructorParameters<typeof Question>[0] = {
@@ -215,10 +269,15 @@ export function buildFedifyQuestion(
     ccs: ccs.map((u) => u),
     sensitive: status.sensitive === 1,
     summary: status.content_warning || null,
+    replies: buildStatusCollection(status.uri, 'replies', status.replies_count ?? 0),
+    shares: buildStatusCollection(status.uri, 'shares', status.reblogs_count ?? 0),
+    likes: buildStatusCollection(status.uri, 'likes', status.favourites_count ?? 0),
+    interactionPolicy: new InteractionPolicy({
+      canQuote: buildCanQuoteRule(status, actorUri),
+    }),
   };
 
   // Set actor URI (Question is an Activity, needs actor)
-  const actorUri = `https://${domain}/users/${account.username}`;
   questionValues.actor = new URL(actorUri);
 
   if (poll.multiple) {
@@ -247,6 +306,18 @@ export function buildFedifyQuestion(
       content: status.text,
       mediaType: 'text/plain',
     });
+  }
+
+  if (status.quote_id) {
+    const quoteUri = helpers.quoteUriMap.get(status.quote_id);
+    if (quoteUri) {
+      questionValues.quote = new URL(quoteUri);
+      questionValues.quoteUrl = new URL(quoteUri);
+    }
+  }
+
+  if (status.quote_authorization_uri) {
+    questionValues.quoteAuthorization = new URL(status.quote_authorization_uri);
   }
 
   // Carry over attachments

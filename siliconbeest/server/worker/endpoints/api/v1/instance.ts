@@ -3,7 +3,7 @@ import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../types';
 import { getVapidPublicKey } from '../../../utils/vapid';
 import { MASTODON_V1_VERSION } from '../../../version';
-import { getSettings, getInstanceTitle, getRules, getStats, getContactAccount } from '../../../services/instance';
+import { getSettings, getInstanceTitle, getRules, getStats, getContactAccount, getFirstAdminAccount } from '../../../services/instance';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -17,23 +17,26 @@ app.get('/', async (c) => {
   const dbSettings = await getSettings([
     'site_description', 'registration_mode', 'registration_message',
     'site_contact_email', 'site_contact_username', 'web_push_enabled',
-  ]);
+  ]).catch((): Record<string, string> => ({}));
 
-  const title = await getInstanceTitle();
-  const description = dbSettings.site_description || `${title} is powered by SiliconBeest, a serverless Fediverse server.`;
-  const registrationMode = dbSettings.registration_mode || env.REGISTRATION_MODE || 'none';
+  const title = await getInstanceTitle().catch(() => env.INSTANCE_TITLE);
+  const description = dbSettings.site_description;
+  const registrationMode = dbSettings.registration_mode || env.REGISTRATION_MODE;
 
   // Stats + rules (parallel)
   const [stats, ruleRows] = await Promise.all([
-    getStats(),
-    getRules(),
+    getStats().catch(() => ({ activeUserCount: 0, statusCount: 0, domainCount: 0 })),
+    getRules().catch(() => []),
   ]);
   const rules = ruleRows.map((r) => ({ id: r.id, text: r.text }));
 
-  // Contact account (admin)
+  // Contact account (admin) — an explicitly configured username wins;
+  // with no setting, the oldest admin serves as the contact.
   let contactAccount = null;
-  const contactUsername = dbSettings.site_contact_username || 'admin';
-  const adminRow = await getContactAccount(contactUsername);
+  const contactUsername = dbSettings.site_contact_username;
+  const adminRow = contactUsername
+    ? await getContactAccount(contactUsername).catch(() => null)
+    : await getFirstAdminAccount().catch(() => null);
 
   if (adminRow) {
     contactAccount = {
@@ -67,19 +70,19 @@ app.get('/', async (c) => {
     title,
     short_description: description,
     description,
-    email: dbSettings.site_contact_email || `admin@${domain}`,
+    email: dbSettings.site_contact_email,
     version: MASTODON_V1_VERSION,
     urls: {
       streaming_api: `wss://${domain}/api/v1/streaming`,
     },
     stats: {
-      user_count: stats.userCount,
+      user_count: stats.activeUserCount,
       status_count: stats.statusCount,
       domain_count: stats.domainCount,
     },
     thumbnail: `https://${domain}/thumbnail.png`,
     languages: ['en'],
-    registrations: registrationMode !== 'none' && registrationMode !== 'closed',
+    registrations: registrationMode === 'open' || registrationMode === 'approval',
     approval_required: registrationMode === 'approval',
     invites_enabled: false,
     configuration: {
@@ -111,7 +114,7 @@ app.get('/', async (c) => {
     contact_account: contactAccount,
     rules,
     push_enabled: dbSettings.web_push_enabled === '1',
-    vapid_key: (await getVapidPublicKey()) || null,
+    vapid_key: (await getVapidPublicKey().catch(() => null)) || null,
   });
 });
 

@@ -12,9 +12,10 @@ import {
   resolveActivityPubAlternate,
   type ActivityPubAlternate,
 } from './activitypub-alternate';
+import { StreamingDO as StreamingDOBase } from './worker/durableObjects/streaming';
 
-// Re-export Durable Object class so the runtime can find it
-export { StreamingDO } from './worker/durableObjects/streaming';
+// Export a top-level Durable Object class so workerd can register the actor.
+export class StreamingDO extends StreamingDOBase {}
 
 // Prefixes / paths handled by the Hono worker app
 const WORKER_PREFIXES = [
@@ -57,6 +58,26 @@ async function attachActivityPubAlternate(
   if (!alternate) return response;
 
   return withActivityPubAlternate(response, alternate);
+}
+
+function wantsActivityPub(request: Request): boolean {
+  const accept = request.headers.get('Accept') ?? '';
+  return accept.includes('application/activity+json') || accept.includes('application/ld+json');
+}
+
+async function routeActivityPubAlternate(
+  request: Request,
+  envBindings: Env,
+  db: D1Database,
+  ctx: ExecutionContext,
+): Promise<Response | null> {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
+  if (!wantsActivityPub(request)) return null;
+
+  const alternate = await resolveActivityPubAlternate(new URL(request.url), db);
+  if (!alternate) return null;
+
+  return app.fetch(new Request(alternate.href, request), envBindings, ctx);
 }
 
 async function withActivityPubAlternate(
@@ -116,6 +137,9 @@ export default {
     if (isWorkerPath(pathname, request)) {
       return app.fetch(request, _env, ctx);
     }
+
+    const activityPubAlternate = await routeActivityPubAlternate(request, _env, _env.DB, ctx);
+    if (activityPubAlternate) return activityPubAlternate;
 
     // 2. Crawler on SPA paths → OG handler
     const ua = request.headers.get('User-Agent');

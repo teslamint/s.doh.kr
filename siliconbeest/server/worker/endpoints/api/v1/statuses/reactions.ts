@@ -20,6 +20,8 @@ import { Like, Undo, Emoji as APEmoji, Image as APImage } from '@fedify/fedify/v
 import { generateUlid } from '../../../../utils/ulid';
 import type { CustomEmojiRow } from '../../../../types/db';
 import { addReaction, removeReaction } from '../../../../services/status';
+import { broadcastReactionEvent } from '../../../../services/streaming';
+import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
 
 const app = new Hono<HonoEnv>();
 
@@ -75,6 +77,9 @@ app.put('/:id/react/:emoji', authRequired, async (c) => {
 
 	await addReaction(currentAccountId, statusId, emoji, domain);
 
+	// Live-update connected clients
+	await broadcastReactionEvent(statusId);
+
 	// Federate the emoji reaction
 	const statusRow = row as Record<string, unknown>;
 	const authorDomain = statusRow.account_domain as string | null;
@@ -122,6 +127,9 @@ app.delete('/:id/react/:emoji', authRequired, async (c) => {
 	if (!row) throw new AppError(404, 'Record not found');
 
 	const { changes } = await removeReaction(currentAccountId, statusId, emoji);
+
+	// Live-update connected clients
+	if (changes > 0) await broadcastReactionEvent(statusId);
 
 	// Federate Undo(Like) for emoji reaction removal
 	const statusRow = row as Record<string, unknown>;
@@ -183,7 +191,7 @@ app.get('/:id/reactions', authOptional, async (c) => {
 		   a.avatar_url, a.avatar_static_url, a.header_url, a.header_static_url,
 		   a.locked, a.bot, a.discoverable,
 		   a.followers_count, a.following_count, a.statuses_count,
-		   a.last_status_at, a.created_at,
+		   a.last_status_at, a.created_at, a.emoji_tags,
 		   ce.shortcode AS ce_shortcode, ce.domain AS ce_domain, ce.image_key AS ce_image_key
 		 FROM emoji_reactions er
 		 JOIN accounts a ON a.id = er.account_id
@@ -302,7 +310,7 @@ app.get('/:id/reactions', authOptional, async (c) => {
 			following_count: (row.following_count as number) || 0,
 			statuses_count: (row.statuses_count as number) || 0,
 			last_status_at: (row.last_status_at as string) || null,
-			emojis: [],
+			emojis: parseCustomEmojiTagsJson(row.emoji_tags as string | null, domain),
 			fields: [],
 		});
 	}

@@ -223,6 +223,18 @@ if [[ -z "$CURRENT_REG" && -f "$MAIN_DIR/wrangler.jsonc" ]]; then
 fi
 CURRENT_REG="${CURRENT_REG:-open}"
 
+# --- Repository URL ---
+CURRENT_REPOSITORY_URL="${REPOSITORY_URL:-}"
+if [[ -z "$CURRENT_REPOSITORY_URL" && -f "$MAIN_DIR/wrangler.jsonc" ]]; then
+  CURRENT_REPOSITORY_URL=$(sed 's|//.*$||' "$MAIN_DIR/wrangler.jsonc" | node -e "
+    try {
+      const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+      if (d.vars?.REPOSITORY_URL) console.log(d.vars.REPOSITORY_URL);
+    } catch(e) {}
+  " 2>/dev/null || true)
+fi
+CURRENT_REPOSITORY_URL="${CURRENT_REPOSITORY_URL:-https://github.com/SJang1/siliconbeest}"
+
 # ============================================================================
 # Summary
 # ============================================================================
@@ -240,6 +252,7 @@ echo "  Queue Email:    ${QUEUE_EMAIL}"
 echo "  Queue DLQ:      ${QUEUE_DLQ}"
 echo "  Domain:         ${CURRENT_DOMAIN}"
 echo "  Title:          ${CURRENT_TITLE}"
+echo "  Repository URL: ${CURRENT_REPOSITORY_URL}"
 echo "  Registration:   ${CURRENT_REG}"
 echo ""
 
@@ -271,7 +284,7 @@ cat > "$MAIN_DIR/wrangler.jsonc" << WRANGLER_EOF
 	"\$schema": "node_modules/wrangler/config-schema.json",
 	"name": "${MAIN_WORKER_NAME}",
 	"main": "server/index.ts",
-	"compatibility_date": "2026-03-17",
+	"compatibility_date": "2026-06-16",
 	"compatibility_flags": ["nodejs_compat"],
 	"assets": {
 		"directory": "./dist/client",
@@ -289,6 +302,7 @@ cat > "$MAIN_DIR/wrangler.jsonc" << WRANGLER_EOF
 	"vars": {
 		"INSTANCE_DOMAIN": "${CURRENT_DOMAIN}",
 		"INSTANCE_TITLE": "${CURRENT_TITLE}",
+		"REPOSITORY_URL": "${CURRENT_REPOSITORY_URL}",
 		"REGISTRATION_MODE": "${CURRENT_REG}",
 		"SKIP_SIGNATURE_VERIFICATION": true
 	},
@@ -378,7 +392,7 @@ cat > "$CONSUMER_DIR/wrangler.jsonc" << WRANGLER_EOF
 	"\$schema": "node_modules/wrangler/config-schema.json",
 	"name": "${CONSUMER_NAME}",
 	"main": "src/index.ts",
-	"compatibility_date": "2026-03-17",
+	"compatibility_date": "2026-06-16",
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": {
 		"enabled": true
@@ -389,6 +403,7 @@ cat > "$CONSUMER_DIR/wrangler.jsonc" << WRANGLER_EOF
 	},
 	"vars": {
 		"INSTANCE_DOMAIN": "${CURRENT_DOMAIN}",
+		"REPOSITORY_URL": "${CURRENT_REPOSITORY_URL}",
 		"SKIP_SIGNATURE_VERIFICATION": true
 	},
 
@@ -442,6 +457,10 @@ cat > "$CONSUMER_DIR/wrangler.jsonc" << WRANGLER_EOF
 			{
 				"queue": "${QUEUE_INTERNAL}",
 				"max_retries": 3
+			},
+			{
+				"queue": "${QUEUE_DLQ}",
+				"max_retries": 2
 			}
 		]
 	},
@@ -464,7 +483,7 @@ cat > "$EMAIL_DIR/wrangler.jsonc" << WRANGLER_EOF
 	"\$schema": "node_modules/wrangler/config-schema.json",
 	"name": "${EMAIL_SENDER_NAME}",
 	"main": "src/index.ts",
-	"compatibility_date": "2026-03-17",
+	"compatibility_date": "2026-06-16",
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": {
 		"enabled": true

@@ -6,9 +6,11 @@
 /* oxlint-disable fp/no-let, fp/no-loop-statements, fp/no-throw-statements, fp/no-try-statements, no-param-reassign */
 
 import { env } from 'cloudflare:workers';
-import type { MediaAttachment as MastodonMediaAttachment, PreviewCard, Poll as MastodonPoll } from '../types/mastodon';
-import { serializeMediaAttachment, serializePoll } from './mastodonSerializer';
-import type { MediaAttachmentRow, PollRow } from '../types/db';
+import type { MediaAttachment as MastodonMediaAttachment, PreviewCard, Poll as MastodonPoll, Status as MastodonStatus } from '../types/mastodon';
+import { serializeAccount, serializeMediaAttachment, serializePoll, serializeStatus } from './mastodonSerializer';
+import type { AccountRow, MediaAttachmentRow, PollRow, StatusRow } from '../types/db';
+import { emojiTagToCustomEmoji } from '../../../../packages/shared/utils/customEmoji';
+import { AS_PUBLIC } from '../../../../packages/shared/utils/quotePolicy';
 
 export type MentionInfo = {
   id: string;
@@ -34,6 +36,21 @@ function proxyEmojiUrl(url: string, instanceDomain: string): string {
   }
 }
 
+function parseApprovalTargets(value: unknown): string[] | null {
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter((item): item is string => typeof item === 'string');
+  } catch {
+    return null;
+  }
+}
+
+function hasPublicApproval(targets: string[]): boolean {
+  return targets.includes(AS_PUBLIC) || targets.includes('as:Public') || targets.includes('Public');
+}
+
 export type EmojiInfo = {
   shortcode: string;
   url: string;
@@ -50,8 +67,11 @@ export type StatusEnrichment = {
   mentions: MentionInfo[];
   card: PreviewCard | null;
   poll: MastodonPoll | null;
+  quote: MastodonStatus | null;
   emojis: EmojiInfo[];
   accountEmojis: EmojiInfo[];
+  quotePolicyAllows: boolean;
+  quotePolicyReason: string | null;
 };
 
 const EMPTY: StatusEnrichment = {
@@ -63,8 +83,11 @@ const EMPTY: StatusEnrichment = {
   mentions: [],
   card: null,
   poll: null,
+  quote: null,
   emojis: [],
   accountEmojis: [],
+  quotePolicyAllows: true,
+  quotePolicyReason: null,
 };
 
 /**
@@ -86,11 +109,121 @@ export async function enrichStatuses(
 
   // Initialize all entries
   for (const id of statusIds) {
-    result.set(id, { ...EMPTY, mediaAttachments: [], reactions: [], mentions: [], card: null, poll: null, emojis: [], accountEmojis: [] });
+    result.set(id, { ...EMPTY, mediaAttachments: [], reactions: [], mentions: [], card: null, poll: null, quote: null, emojis: [], accountEmojis: [], quotePolicyAllows: true, quotePolicyReason: null });
   }
 
   // Build parallel queries
   const queries: Promise<void>[] = [];
+
+  queries.push(
+    env.DB
+      .prepare(
+        `SELECT s.id, s.account_id, s.visibility, s.quote_policy,
+                s.quote_policy_automatic_approvals, s.quote_policy_manual_approvals,
+                a.uri AS account_uri
+         FROM statuses s
+         JOIN accounts a ON a.id = s.account_id
+         WHERE s.id IN (${placeholders})`,
+      )
+      .bind(...statusIds)
+      .all()
+      .then(async ({ results }) => {
+        const followerTargets = new Set<string>();
+        const followingTargets = new Set<string>();
+        const currentAccount = currentAccountId
+          ? await env.DB.prepare('SELECT uri FROM accounts WHERE id = ?1 LIMIT 1')
+            .bind(currentAccountId)
+            .first<{ uri: string }>()
+          : null;
+        const currentAccountUri = currentAccount?.uri ?? null;
+        for (const row of results ?? []) {
+          const visibility = (row.visibility as string) || 'public';
+          const policy = row.quote_policy === 'followers' || row.quote_policy === 'nobody' ? row.quote_policy as string : 'public';
+          const entry = result.get(row.id as string);
+          if (!entry) continue;
+
+          if (currentAccountId && row.account_id === currentAccountId) {
+            entry.quotePolicyAllows = visibility === 'public' || visibility === 'unlisted' || visibility === 'private';
+            entry.quotePolicyReason = null;
+          } else if (visibility !== 'public' && visibility !== 'unlisted') {
+            entry.quotePolicyAllows = false;
+            entry.quotePolicyReason = 'visibility';
+          } else {
+            const automaticApprovals = parseApprovalTargets(row.quote_policy_automatic_approvals);
+            const manualApprovals = parseApprovalTargets(row.quote_policy_manual_approvals);
+            const hasRawPolicy = automaticApprovals !== null || manualApprovals !== null;
+            const approvals = [...(automaticApprovals ?? []), ...(manualApprovals ?? [])];
+            if (hasRawPolicy) {
+              const authorUri = row.account_uri as string;
+              const followersUri = `${authorUri}/followers`;
+              const followingUri = `${authorUri}/following`;
+              if (hasPublicApproval(approvals) || (currentAccountUri && approvals.includes(currentAccountUri))) {
+                entry.quotePolicyAllows = true;
+                entry.quotePolicyReason = null;
+              } else if (!currentAccountId) {
+                entry.quotePolicyAllows = false;
+                entry.quotePolicyReason = 'login_required';
+              } else if (approvals.includes(followersUri)) {
+                entry.quotePolicyAllows = false;
+                entry.quotePolicyReason = 'followers_only';
+                followerTargets.add(row.account_id as string);
+              } else if (approvals.includes(followingUri)) {
+                entry.quotePolicyAllows = false;
+                entry.quotePolicyReason = 'following_only';
+                followingTargets.add(row.account_id as string);
+              } else {
+                entry.quotePolicyAllows = false;
+                entry.quotePolicyReason = 'policy_nobody';
+              }
+            } else if (policy === 'nobody') {
+              entry.quotePolicyAllows = false;
+              entry.quotePolicyReason = 'policy_nobody';
+            } else if (policy === 'followers') {
+              entry.quotePolicyAllows = false;
+              entry.quotePolicyReason = currentAccountId ? 'followers_only' : 'login_required';
+              if (currentAccountId) followerTargets.add(row.account_id as string);
+            } else {
+              entry.quotePolicyAllows = true;
+              entry.quotePolicyReason = null;
+            }
+          }
+        }
+
+        if (!currentAccountId) return;
+        if (followerTargets.size > 0) {
+          const ids = [...followerTargets];
+          const ph = ids.map(() => '?').join(',');
+          const follows = await env.DB.prepare(
+            `SELECT target_account_id FROM follows WHERE account_id = ?1 AND target_account_id IN (${ph})`,
+          ).bind(currentAccountId, ...ids).all<{ target_account_id: string }>();
+          const followed = new Set((follows.results ?? []).map((row) => row.target_account_id));
+          for (const row of results ?? []) {
+            const entry = result.get(row.id as string);
+            if (!entry || entry.quotePolicyReason !== 'followers_only') continue;
+            if (followed.has(row.account_id as string)) {
+              entry.quotePolicyAllows = true;
+              entry.quotePolicyReason = null;
+            }
+          }
+        }
+        if (followingTargets.size > 0) {
+          const ids = [...followingTargets];
+          const ph = ids.map(() => '?').join(',');
+          const follows = await env.DB.prepare(
+            `SELECT account_id FROM follows WHERE target_account_id = ?1 AND account_id IN (${ph})`,
+          ).bind(currentAccountId, ...ids).all<{ account_id: string }>();
+          const followedBy = new Set((follows.results ?? []).map((row) => row.account_id));
+          for (const row of results ?? []) {
+            const entry = result.get(row.id as string);
+            if (!entry || entry.quotePolicyReason !== 'following_only') continue;
+            if (followedBy.has(row.account_id as string)) {
+              entry.quotePolicyAllows = true;
+              entry.quotePolicyReason = null;
+            }
+          }
+        }
+      }),
+  );
 
   // 1. Media attachments (always)
   queries.push(
@@ -313,6 +446,68 @@ export async function enrichStatuses(
     );
   }
 
+  queries.push(
+    env.DB
+      .prepare(
+        `SELECT owner.id AS owner_status_id,
+                qs.*,
+                a.id AS account_id, a.username, a.domain, a.display_name, a.note, a.uri AS account_uri,
+                a.url AS account_url, a.avatar_url, a.avatar_static_url, a.header_url, a.header_static_url,
+                a.locked, a.bot, a.discoverable, a.manually_approves_followers,
+                a.statuses_count, a.followers_count, a.following_count, a.last_status_at,
+                a.created_at AS account_created_at, a.updated_at AS account_updated_at,
+                a.suspended_at, a.silenced_at, a.memorial, a.moved_to_account_id, a.emoji_tags AS account_emoji_tags
+         FROM statuses owner
+         JOIN statuses qs ON qs.id = owner.quote_id AND qs.deleted_at IS NULL
+         JOIN accounts a ON a.id = qs.account_id
+         WHERE owner.id IN (${placeholders})`,
+      )
+      .bind(...statusIds)
+      .all<Record<string, unknown>>()
+      .then(({ results }) => {
+        for (const row of results ?? []) {
+          const entry = result.get(row.owner_status_id as string);
+          if (!entry) continue;
+          const accountRow: AccountRow = {
+            id: row.account_id as string,
+            username: row.username as string,
+            domain: row.domain as string | null,
+            display_name: (row.display_name as string) || '',
+            note: (row.note as string) || '',
+            uri: row.account_uri as string,
+            url: (row.account_url as string) || null,
+            avatar_url: (row.avatar_url as string) || '',
+            avatar_static_url: (row.avatar_static_url as string) || '',
+            header_url: (row.header_url as string) || '',
+            header_static_url: (row.header_static_url as string) || '',
+            locked: (row.locked as number) || 0,
+            bot: (row.bot as number) || 0,
+            discoverable: row.discoverable as number | null,
+            manually_approves_followers: (row.manually_approves_followers as number) || 0,
+            statuses_count: (row.statuses_count as number) || 0,
+            followers_count: (row.followers_count as number) || 0,
+            following_count: (row.following_count as number) || 0,
+            last_status_at: row.last_status_at as string | null,
+            created_at: row.account_created_at as string,
+            updated_at: row.account_updated_at as string,
+            suspended_at: row.suspended_at as string | null,
+            silenced_at: row.silenced_at as string | null,
+            memorial: (row.memorial as number) || 0,
+            moved_to_account_id: row.moved_to_account_id as string | null,
+            emoji_tags: row.account_emoji_tags as string | null,
+          };
+          entry.quote = serializeStatus(row as StatusRow, {
+            account: serializeAccount(accountRow, { instanceDomain: domain }),
+            mediaAttachments: [],
+            mentions: [],
+            tags: [],
+            emojis: [],
+            quote: null,
+          });
+        }
+      }),
+  );
+
   await Promise.all(queries);
 
   // 9. Custom emojis — extract from emoji_tags JSON, verify accessibility, proxy URLs
@@ -348,15 +543,13 @@ export async function enrichStatuses(
     } catch { /* skip */ }
 
     for (const tag of emojiTags) {
-      const shortcode = (typeof tag.shortcode === 'string' ? tag.shortcode : ((tag.name as string) || '').replace(/^:|:$/g, ''));
-      if (!shortcodesInContent.has(shortcode)) continue;
-      const url = (tag.url as string) || (tag.icon as { url?: string } | undefined)?.url;
-      if (!url) continue;
+      const emoji = emojiTagToCustomEmoji(tag);
+      if (!emoji || !shortcodesInContent.has(emoji.shortcode)) continue;
 
-      const proxyUrl = proxyEmojiUrl(url, domain);
+      const proxyUrl = proxyEmojiUrl(emoji.url, domain);
       if (!statusEmojiMap.has(statusId)) statusEmojiMap.set(statusId, []);
       statusEmojiMap.get(statusId)!.push({
-        shortcode,
+        shortcode: emoji.shortcode,
         url: proxyUrl,
         static_url: proxyUrl,
         visible_in_picker: false,

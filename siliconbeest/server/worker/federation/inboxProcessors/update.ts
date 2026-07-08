@@ -12,6 +12,7 @@ import type { UpdateAccountInput } from '../../repositories/account';
 import { sanitizeHtml } from '../../utils/sanitize';
 import { BaseProcessor } from './BaseProcessor';
 import { env } from 'cloudflare:workers';
+import { parseQuotePolicyDetailsFromInteractionPolicy } from '../../../../../packages/shared/utils/quotePolicy';
 
 class UpdateProcessor extends BaseProcessor {
 	async process(activity: APActivity): Promise<void> {
@@ -88,13 +89,25 @@ class UpdateProcessor extends BaseProcessor {
 
 			const sanitizedContent = sanitizeHtml(obj.content ?? '');
 			const sanitizedCw = sanitizeHtml(obj.summary ?? '');
-
-			await this.statusRepo.update(status.id, {
+			const interactionPolicy = (obj as Record<string, unknown>).interactionPolicy;
+			const statusUpdates: Parameters<typeof this.statusRepo.update>[1] = {
 				content: sanitizedContent,
 				content_warning: sanitizedCw,
 				sensitive: obj.sensitive ? 1 : 0,
 				edited_at: now,
-			});
+				};
+				if (interactionPolicy !== undefined) {
+					const quotePolicyDetails = parseQuotePolicyDetailsFromInteractionPolicy(
+						interactionPolicy,
+						activity.actor,
+						`${activity.actor}/followers`,
+					);
+					statusUpdates.quote_policy = quotePolicyDetails.policy;
+					statusUpdates.quote_policy_automatic_approvals = JSON.stringify(quotePolicyDetails.automaticApprovals);
+					statusUpdates.quote_policy_manual_approvals = JSON.stringify(quotePolicyDetails.manualApprovals);
+				}
+
+			await this.statusRepo.update(status.id, statusUpdates);
 
 			// Update poll data if this is a Question
 			if (obj.type === 'Question') {

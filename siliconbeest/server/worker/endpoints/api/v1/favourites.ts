@@ -104,7 +104,10 @@ app.get('/', authRequired, requireScope('read:favourites'), async (c) => {
       mentions: e?.mentions,
       bookmarked: e?.bookmarked,
       card: e?.card, poll: e?.poll,
+      quote: e?.quote,
       emojis: e?.emojis,
+      quotePolicyAllows: e?.quotePolicyAllows,
+      quotePolicyReason: e?.quotePolicyReason,
     });
     // Keep status.id as the status ID (Mastodon API spec)
     // Use f_id internally for pagination Link headers

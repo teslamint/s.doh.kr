@@ -13,6 +13,7 @@ import {
   Announce,
   Hashtag,
   Mention,
+  QuoteAuthorization,
 } from '@fedify/vocab';
 import type { Federation } from '@fedify/fedify';
 import type { FedifyContextData } from '../fedify';
@@ -32,6 +33,36 @@ import { env } from 'cloudflare:workers';
 export function setupObjectDispatchers(
   federation: Federation<FedifyContextData>,
 ): void {
+  federation.setObjectDispatcher(
+    QuoteAuthorization,
+    '/users/{identifier}/stamps/{id}',
+    async (_ctx, values) => {
+      const { identifier, id } = values;
+
+      const row = await env.DB.prepare(
+        `SELECT qa.*, a.username, a.domain AS account_domain, a.uri AS account_uri
+         FROM quote_authorizations qa
+         JOIN accounts a ON a.id = qa.attributed_to_account_id
+         WHERE qa.id = ?1 AND a.username = ?2 AND a.domain IS NULL AND qa.revoked_at IS NULL
+         LIMIT 1`,
+      ).bind(id, identifier).first<{
+        uri: string;
+        account_uri: string;
+        interacting_object_uri: string;
+        interaction_target_uri: string;
+      }>();
+
+      if (!row) return null;
+
+      return new QuoteAuthorization({
+        id: new URL(row.uri),
+        attribution: new URL(row.account_uri),
+        interactingObject: new URL(row.interacting_object_uri),
+        interactionTarget: new URL(row.interaction_target_uri),
+      });
+    },
+  );
+
   federation.setObjectDispatcher(
     Note,
     '/users/{identifier}/statuses/{id}',
@@ -61,7 +92,7 @@ export function setupObjectDispatchers(
       if (!account) return null;
 
       // Load supporting data
-      const { convMap, mediaMap, replyUriMap } = await loadStatusContext(row, id, domain);
+      const { convMap, mediaMap, replyUriMap, quoteUriMap } = await loadStatusContext(row, id, domain);
 
       // Load mention and hashtag tags (shared by Note and Question)
       const tags: (Mention | Hashtag)[] = [];
@@ -94,7 +125,7 @@ export function setupObjectDispatchers(
         ).bind(row.poll_id).first<PollRow>();
         if (poll) {
           const { question } = buildFedifyQuestion(row as StatusRow, account, poll, domain, {
-            convMap, mediaMap, replyUriMap,
+            convMap, mediaMap, replyUriMap, quoteUriMap,
           });
           return tags.length > 0 ? question.clone({ tags }) : question;
         }
@@ -102,7 +133,7 @@ export function setupObjectDispatchers(
 
       // Build core Note
       const { note } = buildFedifyNote(row as StatusRow, account, domain, {
-        convMap, mediaMap, replyUriMap,
+        convMap, mediaMap, replyUriMap, quoteUriMap,
       });
 
       return tags.length > 0 ? note.clone({ tags }) : note;
@@ -171,7 +202,7 @@ export async function handleActivityRequest(
       });
     }
 
-    const { convMap, mediaMap, replyUriMap } = await loadStatusContext(row, id, domain);
+    const { convMap, mediaMap, replyUriMap, quoteUriMap } = await loadStatusContext(row, id, domain);
 
     // Check for poll → build Question instead of Note
     let objectToWrap: Note | Question;
@@ -184,14 +215,14 @@ export async function handleActivityRequest(
       ).bind(row.poll_id).first<PollRow>();
       if (poll) {
         const result = buildFedifyQuestion(row as StatusRow, account, poll, domain, {
-          convMap, mediaMap, replyUriMap,
+          convMap, mediaMap, replyUriMap, quoteUriMap,
         });
         objectToWrap = result.question;
         tos = result.tos;
         ccs = result.ccs;
       } else {
         const result = buildFedifyNote(row as StatusRow, account, domain, {
-          convMap, mediaMap, replyUriMap,
+          convMap, mediaMap, replyUriMap, quoteUriMap,
         });
         objectToWrap = result.note;
         tos = result.tos;
@@ -199,7 +230,7 @@ export async function handleActivityRequest(
       }
     } else {
       const result = buildFedifyNote(row as StatusRow, account, domain, {
-        convMap, mediaMap, replyUriMap,
+        convMap, mediaMap, replyUriMap, quoteUriMap,
       });
       objectToWrap = result.note;
       tos = result.tos;
@@ -221,6 +252,133 @@ export async function handleActivityRequest(
     status: 200,
     headers: { 'Content-Type': 'application/activity+json; charset=utf-8' },
   });
+}
+
+type StatusCollectionName = 'replies' | 'shares' | 'likes';
+
+function collectionResponse(body: Record<string, unknown>, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/activity+json; charset=utf-8' },
+  });
+}
+
+async function getStatusCollectionItems(
+  statusId: string,
+  collection: StatusCollectionName,
+): Promise<string[]> {
+  if (collection === 'replies') {
+    const { results } = await env.DB.prepare(
+      `SELECT uri
+       FROM statuses
+       WHERE in_reply_to_id = ?1
+         AND deleted_at IS NULL
+         AND visibility IN ('public', 'unlisted')
+       ORDER BY created_at ASC
+       LIMIT 40`,
+    ).bind(statusId).all<{ uri: string }>();
+    return (results ?? []).map((row) => row.uri);
+  }
+
+  if (collection === 'shares') {
+    const { results } = await env.DB.prepare(
+      `SELECT uri
+       FROM statuses
+       WHERE (reblog_of_id = ?1 OR quote_id = ?1)
+         AND deleted_at IS NULL
+         AND visibility IN ('public', 'unlisted')
+       ORDER BY created_at ASC
+       LIMIT 40`,
+    ).bind(statusId).all<{ uri: string }>();
+    return (results ?? []).map((row) => row.uri);
+  }
+
+  const { results } = await env.DB.prepare(
+    `SELECT uri
+     FROM favourites
+     WHERE status_id = ?1
+       AND uri IS NOT NULL
+     ORDER BY created_at ASC
+     LIMIT 40`,
+  ).bind(statusId).all<{ uri: string | null }>();
+  return (results ?? [])
+    .map((row) => row.uri)
+    .filter((uri): uri is string => typeof uri === 'string' && uri.length > 0);
+}
+
+export async function handleStatusCollectionRequest(
+  identifier: string,
+  id: string,
+  collection: string,
+  page = false,
+): Promise<Response> {
+  if (collection !== 'replies' && collection !== 'shares' && collection !== 'likes') {
+    return collectionResponse({ error: 'Record not found' }, 404);
+  }
+
+  const domain = env.INSTANCE_DOMAIN;
+  const row = await env.DB.prepare(
+    `SELECT s.id, s.uri, s.replies_count, s.reblogs_count, s.favourites_count
+     FROM statuses s
+     JOIN accounts a ON a.id = s.account_id
+     WHERE s.id = ?1
+       AND a.username = ?2
+       AND a.domain IS NULL
+       AND s.deleted_at IS NULL
+       AND s.reblog_of_id IS NULL
+     LIMIT 1`,
+  ).bind(id, identifier).first<{
+    id: string;
+    uri: string;
+    replies_count: number;
+    reblogs_count: number;
+    favourites_count: number;
+  }>();
+
+  if (!row) {
+    return collectionResponse({ error: 'Record not found' }, 404);
+  }
+
+  const totalItems = collection === 'replies'
+    ? row.replies_count
+    : collection === 'shares'
+      ? row.reblogs_count
+      : row.favourites_count;
+  const items = await getStatusCollectionItems(row.id, collection);
+  const collectionUri = `https://${domain}/users/${identifier}/statuses/${id}/${collection}`;
+
+  if (collection === 'replies') {
+    if (!page) {
+      return collectionResponse({
+        '@context': 'https://www.w3.org/ns/activitystreams',
+        id: collectionUri,
+        type: 'Collection',
+        first: {
+          type: 'CollectionPage',
+          id: `${collectionUri}?page=true`,
+          partOf: collectionUri,
+          next: `${collectionUri}?only_other_accounts=true&page=true`,
+        },
+      });
+    }
+
+    return collectionResponse({
+      '@context': 'https://www.w3.org/ns/activitystreams',
+      id: `${collectionUri}?page=true`,
+      type: 'CollectionPage',
+      partOf: collectionUri,
+      items,
+    });
+  }
+
+  const body: Record<string, unknown> = {
+    '@context': 'https://www.w3.org/ns/activitystreams',
+    id: collectionUri,
+    type: 'Collection',
+    totalItems: totalItems ?? 0,
+  };
+  if (items.length > 0) body.items = items;
+  return collectionResponse(body);
 }
 
 // ============================================================
@@ -266,5 +424,13 @@ async function loadStatusContext(
     if (rr) replyUriMap.set(row.in_reply_to_id, rr.uri);
   }
 
-  return { convMap, mediaMap, replyUriMap };
+  const quoteUriMap = new Map<string, string>();
+  if (row.quote_id) {
+    const quotedRow = await env.DB.prepare(
+      'SELECT uri FROM statuses WHERE id = ?1 AND deleted_at IS NULL LIMIT 1',
+    ).bind(row.quote_id).first<{ uri: string }>();
+    if (quotedRow) quoteUriMap.set(row.quote_id, quotedRow.uri);
+  }
+
+  return { convMap, mediaMap, replyUriMap, quoteUriMap };
 }

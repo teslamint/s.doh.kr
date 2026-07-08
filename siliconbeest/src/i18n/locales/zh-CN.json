@@ -16,7 +16,12 @@
     "copied": "已复制到剪贴板",
     "upload": "上传",
     "uploading": "上传中...",
-    "load_more": "加载更多"
+    "load_more": "加载更多",
+    "previous": "上一个",
+    "remove": "移除",
+    "move_up": "上移",
+    "move_down": "下移",
+    "auto": "自动"
   },
   "auth": {
     "login": "登录",
@@ -121,7 +126,16 @@
     "poll_multiple": "多选",
     "poll_minutes": "分钟",
     "poll_hours": "小时",
-    "poll_days": "天"
+    "poll_days": "天",
+    "post_visibility_label": "帖子可见度",
+    "quote_permission_label": "引用权限",
+    "post_language_label": "帖子语言",
+    "quote_policy": {
+      "label": "引用政策",
+      "public": "允许所有人",
+      "followers": "仅关注者",
+      "nobody": "不允许"
+    }
   },
   "poll": {
     "vote": "投票",
@@ -156,7 +170,10 @@
     "followed_tags": "关注的话题标签",
     "directory": "用户目录",
     "local_timeline": "本站时间线",
-    "federated_timeline": "跨站时间线"
+    "federated_timeline": "跨站时间线",
+    "main_navigation": "主导航",
+    "mobile_navigation": "移动端导航",
+    "social_timeline": "社交时间线"
   },
   "explore": {
     "trending": "热门",
@@ -181,7 +198,11 @@
   "status": {
     "reply": "回复",
     "boost": "转发",
+    "unboost": "取消转发",
+    "quote": "引用",
     "favourite": "收藏",
+    "unfavourite": "取消收藏",
+    "react": "使用表情回应",
     "bookmark": "书签",
     "share": "分享",
     "copyLink": "复制链接",
@@ -216,7 +237,13 @@
     "visibility_direct": "私信",
     "report": "举报",
     "reblogged": "已转发",
-    "cannot_boost": "此帖文无法被转发"
+    "cannot_boost": "此帖文无法被转发",
+    "cannot_quote": "此帖文无法被引用",
+    "cannot_quote_visibility": "只有公开或未列出的帖子可以被引用",
+    "cannot_quote_policy_nobody": "作者不允许引用此帖子",
+    "cannot_quote_followers_only": "只有作者的关注者可以引用此帖子",
+    "cannot_quote_following_only": "只有作者关注的用户可以引用此帖子",
+    "cannot_quote_login_required": "以关注者身份登录后才能引用此帖子"
   },
   "notification": {
     "title": "通知",
@@ -364,6 +391,14 @@
     "posting": "发帖",
     "posting_default_visibility": "默认帖子可见度",
     "posting_default_visibility_desc": "新帖子将默认使用此可见度。回复串帖时，可见度会被限制在上级帖子的范围内。",
+    "default_quote_policy": "默认引用政策",
+    "default_quote_policy_desc": "选择新帖默认允许谁引用。",
+    "quote_policy_public": "允许所有人",
+    "quote_policy_public_desc": "任何人都可以引用此帖子。",
+    "quote_policy_followers": "仅关注者",
+    "quote_policy_followers_desc": "只有关注你的人可以引用此帖子。",
+    "quote_policy_nobody": "不允许",
+    "quote_policy_nobody_desc": "除你之外，没有人可以引用此帖子。",
     "posting_visibility_saved": "默认可见度已保存。",
     "columns": "栏目",
     "columns_desc": "选择在宽屏幕上主页时间线旁显示的栏目。",
@@ -406,7 +441,26 @@
       "detail": "实例详情",
       "registrations": "开放注册",
       "first_seen": "首次发现",
-      "description": "描述"
+      "description": "描述",
+      "dlq": {
+        "title": "死信队列",
+        "link": "失败消息",
+        "description": "已用尽所有重试的联邦消息。重放会将其重新加入联邦队列，丢弃则标记为已处理。",
+        "parked": "已搁置",
+        "replayed": "已重放",
+        "discarded": "已丢弃",
+        "activity": "活动",
+        "actor": "操作者",
+        "error": "错误",
+        "attempts": "尝试次数",
+        "parked_at": "搁置时间",
+        "message_type": "消息类型",
+        "body": "消息内容",
+        "replay": "重放",
+        "discard": "丢弃",
+        "discard_confirm": "确定丢弃此消息？它将不会再被处理。",
+        "empty": "暂无消息"
+      }
     },
     "domainBlocks": "域名屏蔽",
     "emailDomainBlocks": "邮箱域名屏蔽",
@@ -679,9 +733,13 @@
       "terms_of_service": "服务条款",
       "terms_of_service_desc": "用 Markdown 编写服务条款。",
       "privacy_policy": "隐私政策",
-      "privacy_policy_desc": "用 Markdown 编写隐私政策。"
+      "privacy_policy_desc": "用 Markdown 编写隐私政策。",
+      "accent_color": "Deck 强调色"
     },
-    "registration_message_help": "此信息将在注册页面上显示给用户。"
+    "registration_message_help": "此信息将在注册页面上显示给用户。",
+    "vapid_public_key_placeholder": "Base64url 编码的 P-256 公钥（65 字节）",
+    "vapid_private_key_placeholder": "Base64url 编码的 P-256 私钥（32 字节）",
+    "accent_color_hint": "应用于所有访客的 Deck 界面(按钮、活动状态、实时指示器)。"
   },
   "legal": {
     "terms_of_service": "服务条款",
@@ -818,7 +876,8 @@
     "backup_codes_description": "请将这些备用代码保存在安全的地方。每个代码只能使用一次。",
     "backup_codes_warning": "这些代码不会再次显示。",
     "invalid_code": "代码无效，请重试。",
-    "copied": "已复制！"
+    "copied": "已复制！",
+    "qr_alt": "TOTP 二维码"
   },
   "turnstile": {
     "title": "Turnstile (CAPTCHA)",
@@ -916,6 +975,273 @@
       "write:reports": "提交举报",
       "admin:read": "查看管理数据",
       "admin:write": "修改管理数据"
+    }
+  },
+  "design": {
+    "classicBanner": "您正在浏览经典版界面",
+    "switchToNew": "试试全新设计",
+    "backToClassic": "经典版界面",
+    "auroraBanner": "您正在浏览 Aurora 设计。"
+  },
+  "setup": {
+    "subtitle": "创建第一个管理员账号。",
+    "unavailable": "已存在用户，初始设置不可用。",
+    "admin_username": "管理员用户名",
+    "admin_email": "管理员邮箱",
+    "password": "密码",
+    "confirm_password": "确认密码",
+    "create": "创建管理员",
+    "creating": "创建中...",
+    "create_failed": "创建管理员失败。",
+    "username_required": "请输入用户名。",
+    "username_invalid": "用户名只能包含字母、数字和下划线。",
+    "email_required": "请输入邮箱地址。",
+    "password_required": "请输入密码。",
+    "password_too_short": "密码长度至少为 8 个字符。",
+    "password_mismatch": "两次输入的密码不一致。"
+  },
+  "deck": {
+    "col_home": "home",
+    "col_local": "local",
+    "col_federated": "federated",
+    "scope_following": "关注中",
+    "scope_federated": "已知网络",
+    "live": "LIVE",
+    "streaming": "实时",
+    "note": "发帖",
+    "columns_empty": "所有栏目均已隐藏。请从左侧栏重新打开时间线。",
+    "toggle_column": "切换 {name} 栏目",
+    "design_aurora": "Aurora 界面",
+    "design_classic": "经典界面",
+    "deck": "面板",
+    "columns_short": "栏目",
+    "columns_title": "面板栏目",
+    "col_notifications": "alerts",
+    "move_up": "上移",
+    "move_down": "下移",
+    "drag_to_reorder": "拖动以重新排序",
+    "live_toggle": "切换实时更新",
+    "react": "用表情回应",
+    "unboost": "取消转发",
+    "unfavourite": "取消收藏",
+    "remote_reaction_hint": "来自其他服务器的表情",
+    "col_search": "search",
+    "col_requests": "follow requests",
+    "unbookmark": "移除书签",
+    "col_social": "social",
+    "scope_social": "主页 + 本站",
+    "scope_alerts": "动态",
+    "scope_requests": "关注请求",
+    "scope_search": "全部",
+    "nav_home": "主页",
+    "nav_social": "社交",
+    "nav_local": "本站",
+    "nav_federated": "跨站",
+    "nav_alerts": "通知",
+    "nav_requests": "请求",
+    "section_timelines": "时间线"
+  },
+  "airport": {
+    "pageTitle": "{name} 机场 — 本服务器的实时地图",
+    "title": "{name} 机场",
+    "subtitle": "把本服务器最近24小时画成一座真正运转的机场。每条线路都与真实架构一致，每个数字都是真的。",
+    "asOf": "截至 {time}",
+    "status": {
+      "live": "实时",
+      "lastKnown": "最近值",
+      "connecting": "连接中"
+    },
+    "sceneLabel": "展示服务器管线的实时机场模拟",
+    "cards": {
+      "departures": "出发旅客",
+      "arrivals": "到达旅客",
+      "transfers": "中转",
+      "cargoOut": "货物(出港)",
+      "cargoIn": "货物(进港)",
+      "passports": "护照签发",
+      "items": "{count} 件"
+    },
+    "scene": {
+      "sky": "联邦天空",
+      "runwayDep": "出发跑道",
+      "runwayDepSub": "(联邦发送)",
+      "runwayArr": "到达跑道",
+      "runwayArrSub": "(inbox)",
+      "tower": "塔台",
+      "towerSub": "(运行 · 队列)",
+      "towerLine": "起降 {movements} 次 · DLQ {dlq}",
+      "dlqClear": "无",
+      "cargo": "货运站 (R2)",
+      "cargoSub": "腹舱货物 · 媒体",
+      "city": "市区",
+      "landsideDep": "出发 · 陆侧",
+      "landsideArr": "到达 · 陆侧",
+      "cloudflare": "Cloudflare 闸口",
+      "checkin": "值机",
+      "security": "安检",
+      "passport": "证件查验",
+      "boarding": "登机 ↑",
+      "arrivalsDown": "↓ 到达",
+      "announce": "广播",
+      "announceSub": "(流媒体)",
+      "today": "今日",
+      "exit": "出口",
+      "baggage": "行李提取",
+      "immigration": "入境检查",
+      "immigrationSub": "(签名)",
+      "dlqHolding": "DLQ 停机坪",
+      "gateA1": "A1 · 出发",
+      "gateA2": "A2 · 到达"
+    },
+    "info": {
+      "default": {
+        "title": "{name} 机场",
+        "body": "这张地图上的每个设施都是本服务器联邦管线的真实组件。把鼠标悬停在任何地方，就能看到它是哪个部分。",
+        "stat": "24小时 · 实时"
+      },
+      "cloudflare": {
+        "title": "Cloudflare 闸口",
+        "body": "边缘节点。来自联邦宇宙和浏览器的所有 HTTP 请求都先经 Cloudflare 网络进入这台服务器。",
+        "stat": "边缘"
+      },
+      "checkin": {
+        "title": "值机",
+        "body": "限流器。限制单个客户端访问 API 的频率，突发流量不会压垮服务器。",
+        "stat": "限流"
+      },
+      "security": {
+        "title": "安检",
+        "body": "反机器人防线(Turnstile)。AI 爬虫和垃圾机器人在这里被拦下，真人直接通过。",
+        "stat": "反爬虫"
+      },
+      "passport": {
+        "title": "证件查验",
+        "body": "认证。登录会话或应用的 OAuth 令牌在这里核验之后，才能对服务器进行写入。",
+        "stat": "认证"
+      },
+      "gate": {
+        "title": "停机位",
+        "body": "联邦队列。刚发布的帖子作为投递任务(QUEUE_FEDERATION)在这里排队，等队列消费者把它运出去。",
+        "stat": "队列"
+      },
+      "immigration": {
+        "title": "入境检查",
+        "body": "入站 HTTP 签名验证。到达 inbox 的每条活动都要在这里证明确实来自它声称的服务器。",
+        "stat": "{arrivals} 人通过"
+      },
+      "baggage": {
+        "title": "行李提取",
+        "body": "远程媒体。随联邦帖子而来的附件由媒体代理取回并展示。",
+        "stat": "附件"
+      },
+      "exit": {
+        "title": "出口",
+        "body": "时间线。通过验证的远程帖子在这里离开管线，出现在本地信息流中。",
+        "stat": "时间线"
+      },
+      "cargo": {
+        "title": "货运站 (R2)",
+        "body": "对象存储(R2 MEDIA_BUCKET)。上传的图片、视频、音频都存放在这里 — 媒体从不随帖子本体一起移动。",
+        "stat": "进 {cargoIn} · 出 {cargoOut}"
+      },
+      "announce": {
+        "title": "广播 (流媒体)",
+        "body": "流媒体服务(Durable Object)。它通过 WebSocket 向所有在线客户端实时推送新帖子和通知。",
+        "stat": "今日 {announceN} 条"
+      },
+      "tower": {
+        "title": "塔台 (运行)",
+        "body": "队列消费者 worker。它按顺序处理联邦队列，为活动签名并投递，逐服务器记录成功或失败。",
+        "stat": "起降 {movements} 次"
+      },
+      "dlq": {
+        "title": "DLQ 停机坪",
+        "body": "死信积压(federation_dlq_parked)。耗尽所有重试的投递停在这里，等管理员重发或清理 — 红色表示有东西没能落地。",
+        "statEmpty": "空 · 很好",
+        "statWaiting": "{dlq} 件等待"
+      },
+      "deprwy": {
+        "title": "出发跑道 09L",
+        "body": "联邦发送。队列消费者为每条 ActivityPub 活动签名并直接 POST 到目标服务器的 inbox — 直接飞出，不再经过 Cloudflare。",
+        "stat": "{departures} 班出发"
+      },
+      "arrrwy": {
+        "title": "到达跑道 09R",
+        "body": "联邦接收 — 本服务器的共享 inbox。其他服务器发来的活动在这里降落。",
+        "stat": "{arrivals} 班降落"
+      },
+      "beaconBody": "与本服务器联邦的另一台 Fediverse 服务器。信标大小是最近24小时从那里到达的帖子数量。",
+      "beaconStat": "{count} 件到达"
+    },
+    "ops": {
+      "title": "运行状况",
+      "gate": {
+        "title": "正门·航站楼",
+        "status": "运营中",
+        "desc": "连接你和{title}的正门——这个页面也是从这扇门进来的。新帖子(出发旅客),最近一天 {departures} 人。"
+      },
+      "federation": {
+        "title": "国际航线(联邦)",
+        "statusOk": "运行中",
+        "statusDelayed": "部分延误",
+        "desc": "最近一天有 {arrivals} 人从 {destinations} 座机场抵达。新帖子在这里办理飞向联邦天空的手续。",
+        "delayedNote": "以下航线积累了投递失败:",
+        "failures": "投递失败 {count} 次"
+      },
+      "transfer": {
+        "title": "中转通道",
+        "status": "运营中",
+        "desc": "最近一天有 {transfers} 人抵达后经中转通道再次登上出发航班。转发走的就是这条路。"
+      },
+      "cargo": {
+        "title": "货运站(R2)",
+        "status": "运转中",
+        "desc": "最近一天有 {out} 件托运货物({bytes})进入仓库,{in} 件到达货物送到了行李提取处。"
+      },
+      "passport": {
+        "title": "护照柜台",
+        "status": "运营中",
+        "desc": "最近一天签发了 {count} 本新护照。新账号就是新护照。"
+      },
+      "tower": {
+        "title": "塔台广播",
+        "status": "播报中",
+        "desc": "有新帖子时,塔台会立刻向在线的屏幕播报。最近一天播报了 {total} 条。"
+      },
+      "dlq": {
+        "title": "滞留货物停放区",
+        "statusEmpty": "空",
+        "statusParked": "滞留 {count} 件",
+        "emptyDesc": "停放区空空如也。这是好消息。",
+        "parkedDesc": "有 {count} 件货物始终未能送达,停在停放区。管理员可以重发或清理。"
+      }
+    },
+    "story": {
+      "title": "机场是这样运转的",
+      "p1": {
+        "lead": "每个设施都是真实组件。",
+        "body": "这张地图是把服务器的真实管线画成机场：真实架构里没有的设施一概不画，真实存在的线路一条不漏。飞机是氛围，数字不是。"
+      },
+      "p2": {
+        "lead": "陆侧就是请求管线。",
+        "body": "每个请求都从 Cloudflare 边缘进入，依次通过限流器(值机)、反机器人(安检)、认证(证件查验)才能做任何事 — 顺序与真实中间件完全一致。"
+      },
+      "p3": {
+        "lead": "货物就是媒体。",
+        "body": "图片和视频从不装在帖子里移动。它们住在 R2 对象存储(货运站)里，单独运输 — 出港走上传，进港由媒体代理取回。"
+      },
+      "p4": {
+        "lead": "到达就是联邦接收。",
+        "body": "其他服务器的帖子降落在共享 inbox(09R)，通过 HTTP 签名验证(入境检查)后才进入本地时间线(出口)。"
+      },
+      "p5": {
+        "lead": "广播就是流媒体服务。",
+        "body": "一个 Durable Object 与所有打开的客户端保持 WebSocket 连接，新帖子和通知一产生就立即推送。"
+      },
+      "p6": {
+        "lead": "塔台与 DLQ。",
+        "body": "塔台是队列消费者：按顺序处理联邦队列，逐服务器记录投递成败。耗尽重试的投递停进死信表(DLQ 停机坪)等管理员重发。数字约每分钟刷新一次，不包含账号、收件人或内容。"
+      }
     }
   }
 }

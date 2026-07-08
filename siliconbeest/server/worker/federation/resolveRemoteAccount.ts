@@ -17,6 +17,7 @@ import { sanitizeHtml } from '../utils/sanitize';
 import { createFed } from './fedify';
 import { getFedifyContext } from './helpers/send';
 import { pickSignerUsername } from '../../../../packages/shared/services/signer';
+import { emojiTagToCustomEmoji } from '../../../../packages/shared/utils/customEmoji';
 
 /**
  * Resolve or upsert a remote ActivityPub account.
@@ -30,10 +31,17 @@ export async function resolveRemoteAccount(
 	actorUri: string,
 	signerAccountId: string | null = null,
 ): Promise<string | null> {
+	// URI hosts are case-insensitive (DNS): normalize through the WHATWG URL
+	// parser (lowercases scheme+host, preserves path case) so the dedup lookup
+	// matches the stored canonical form. The raw input is checked too, because
+	// rows written before this normalization may carry an unnormalized uri.
+	let lookupUri = actorUri;
+	try { lookupUri = new URL(actorUri).href; } catch { /* keep raw */ }
+
 	const existing = await env.DB.prepare(
-		`SELECT id FROM accounts WHERE uri = ?1 LIMIT 1`,
+		`SELECT id FROM accounts WHERE uri IN (?1, ?2) LIMIT 1`,
 	)
-		.bind(actorUri)
+		.bind(lookupUri, actorUri)
 		.first<{ id: string }>();
 
 	if (existing) return existing.id;
@@ -48,7 +56,11 @@ export async function resolveRemoteAccount(
 	let headerUrl = '';
 	let summary = '';
 	let actorUrl = '';
+	let emojiTagsJson: string | null = null;
 	let resolved = false;
+	// The actor's own id is the canonical AP identity — store and enqueue that,
+	// not the (possibly differently-cased) reference URI we were handed.
+	let canonicalUri = lookupUri;
 
 	try {
 		const url = new URL(actorUri);
@@ -76,6 +88,7 @@ export async function resolveRemoteAccount(
 		const actorObj = await ctx.lookupObject(actorUri, { documentLoader: docLoader });
 		if (actorObj && isActor(actorObj)) {
 			resolved = true;
+			canonicalUri = actorObj.id?.href ?? lookupUri;
 			username = (actorObj.preferredUsername ?? '') as string;
 			displayName = (actorObj.name?.toString() ?? '') as string;
 			summary = sanitizeHtml(actorObj.summary?.toString() ?? '');
@@ -87,6 +100,17 @@ export async function resolveRemoteAccount(
 			if (icon?.url) avatarUrl = String(icon.url);
 			const image = await actorObj.getImage({ documentLoader: docLoader });
 			if (image?.url) headerUrl = String(image.url);
+
+			const actorDoc = await actorObj.toJsonLd() as Record<string, unknown>;
+			const tags = actorDoc.tag as Array<Record<string, unknown>> | undefined;
+			if (Array.isArray(tags)) {
+				const emojis = tags
+					.filter((tag) => tag.type === 'Emoji')
+					.map((tag) => emojiTagToCustomEmoji(tag))
+					.filter((emoji): emoji is NonNullable<typeof emoji> => !!emoji)
+					.map((emoji) => ({ shortcode: emoji.shortcode, url: emoji.url, static_url: emoji.static_url }));
+				emojiTagsJson = emojis.length > 0 ? JSON.stringify(emojis) : null;
+			}
 		} else {
 			console.warn(`[resolveRemoteAccount] Could not resolve actor via Fedify: ${actorUri}`);
 		}
@@ -113,21 +137,45 @@ export async function resolveRemoteAccount(
 		return null;
 	}
 
+	// The canonical id may differ from the reference URI we were handed (e.g.
+	// host casing, or a forwarded/alternate URI). Dedup again by the canonical
+	// id and re-derive the domain from it before inserting.
+	if (canonicalUri !== lookupUri) {
+		const byCanonical = await env.DB.prepare(
+			`SELECT id FROM accounts WHERE uri = ?1 LIMIT 1`,
+		)
+			.bind(canonicalUri)
+			.first<{ id: string }>();
+		if (byCanonical) return byCanonical.id;
+
+		try {
+			const canonicalHost = new URL(canonicalUri).host;
+			if (canonicalHost !== domain) {
+				domain = canonicalHost;
+				const canonicalBlock = await isDomainBlocked(env.DB, env.CACHE ?? null, domain);
+				if (canonicalBlock.blocked) {
+					console.log(`[resolveRemoteAccount] Refusing to resolve account from suspended domain: ${domain}`);
+					return null;
+				}
+			}
+		} catch { /* keep the domain derived from the reference URI */ }
+	}
+
 	const now = new Date().toISOString();
 	const id = generateUlid();
 
 	try {
 		await env.DB.prepare(
-			`INSERT INTO accounts (id, username, domain, display_name, note, uri, url, avatar_url, avatar_static_url, header_url, header_static_url, inbox_url, shared_inbox_url, created_at, updated_at)
-			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9, ?9, ?10, ?11, ?12, ?12)`,
+			`INSERT INTO accounts (id, username, domain, display_name, note, uri, url, avatar_url, avatar_static_url, header_url, header_static_url, inbox_url, shared_inbox_url, emoji_tags, created_at, updated_at)
+			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9, ?9, ?10, ?11, ?12, ?13, ?13)`,
 		)
-			.bind(id, username, domain, displayName, summary, actorUri, actorUrl || actorUri, avatarUrl, headerUrl, inboxUrl, sharedInboxUrl, now)
+			.bind(id, username, domain, displayName, summary, canonicalUri, actorUrl || canonicalUri, avatarUrl, headerUrl, inboxUrl, sharedInboxUrl, emojiTagsJson, now)
 			.run();
 	} catch {
 		const retry = await env.DB.prepare(
-			`SELECT id FROM accounts WHERE uri = ?1 LIMIT 1`,
+			`SELECT id FROM accounts WHERE uri IN (?1, ?2) LIMIT 1`,
 		)
-			.bind(actorUri)
+			.bind(canonicalUri, actorUri)
 			.first<{ id: string }>();
 		return retry?.id ?? null;
 	}
@@ -135,7 +183,7 @@ export async function resolveRemoteAccount(
 	// Also enqueue a full fetch for any fields we might have missed
 	await env.QUEUE_FEDERATION.send({
 		type: 'fetch_remote_account',
-		actorUri,
+		actorUri: canonicalUri,
 		...(signerAccountId ? { signerAccountId } : {}),
 	});
 

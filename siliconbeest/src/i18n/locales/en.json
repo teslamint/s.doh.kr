@@ -16,7 +16,12 @@
     "copied": "Copied to clipboard",
     "upload": "Upload",
     "uploading": "Uploading...",
-    "load_more": "Load more"
+    "load_more": "Load more",
+    "previous": "Previous",
+    "remove": "Remove",
+    "move_up": "Move up",
+    "move_down": "Move down",
+    "auto": "Auto"
   },
   "auth": {
     "login": "Log in",
@@ -121,7 +126,16 @@
     "poll_multiple": "Multiple choices",
     "poll_minutes": "min",
     "poll_hours": "hr",
-    "poll_days": "day"
+    "poll_days": "day",
+    "post_visibility_label": "Post visibility",
+    "quote_permission_label": "Quote permission",
+    "post_language_label": "Post language",
+    "quote_policy": {
+      "label": "Quote policy",
+      "public": "Allow everyone",
+      "followers": "Followers only",
+      "nobody": "Do not allow"
+    }
   },
   "poll": {
     "vote": "Vote",
@@ -156,7 +170,10 @@
     "followed_tags": "Followed Tags",
     "directory": "Directory",
     "local_timeline": "Local Timeline",
-    "federated_timeline": "Federated Timeline"
+    "federated_timeline": "Federated Timeline",
+    "main_navigation": "Main navigation",
+    "mobile_navigation": "Mobile navigation",
+    "social_timeline": "Social Timeline"
   },
   "explore": {
     "trending": "Trending",
@@ -181,7 +198,11 @@
   "status": {
     "reply": "Reply",
     "boost": "Boost",
+    "unboost": "Undo boost",
+    "quote": "Quote",
     "favourite": "Favourite",
+    "unfavourite": "Undo favourite",
+    "react": "React with emoji",
     "bookmark": "Bookmark",
     "share": "Share",
     "copyLink": "Copy link",
@@ -216,7 +237,13 @@
     "visibility_direct": "Direct message",
     "report": "Report",
     "reblogged": "boosted",
-    "cannot_boost": "This post cannot be boosted"
+    "cannot_boost": "This post cannot be boosted",
+    "cannot_quote": "This post cannot be quoted",
+    "cannot_quote_visibility": "Only public or unlisted posts can be quoted",
+    "cannot_quote_policy_nobody": "The author does not allow quotes for this post",
+    "cannot_quote_followers_only": "Only the author's followers can quote this post",
+    "cannot_quote_following_only": "Only accounts followed by the author can quote this post",
+    "cannot_quote_login_required": "Log in as a follower to quote this post"
   },
   "notification": {
     "title": "Notifications",
@@ -364,6 +391,14 @@
     "posting": "Posting",
     "posting_default_visibility": "Default post visibility",
     "posting_default_visibility_desc": "New posts will use this visibility by default. When replying to a thread, visibility will be clamped to the parent post's level.",
+    "default_quote_policy": "Default quote policy",
+    "default_quote_policy_desc": "Choose who can quote your new posts by default.",
+    "quote_policy_public": "Allow everyone",
+    "quote_policy_public_desc": "Anyone can quote this post.",
+    "quote_policy_followers": "Followers only",
+    "quote_policy_followers_desc": "Only people following you can quote this post.",
+    "quote_policy_nobody": "Do not allow",
+    "quote_policy_nobody_desc": "No one except you can quote this post.",
     "posting_visibility_saved": "Default visibility saved.",
     "columns": "Columns",
     "columns_desc": "Choose which columns to show alongside your home timeline on wide screens.",
@@ -406,7 +441,26 @@
       "detail": "Instance Details",
       "registrations": "Open Registration",
       "first_seen": "First Seen",
-      "description": "Description"
+      "description": "Description",
+      "dlq": {
+        "title": "Dead Letter Queue",
+        "link": "Dead letters",
+        "description": "Federation messages that failed all retries. Replay re-enqueues them to the federation queue; discard marks them as handled.",
+        "parked": "Parked",
+        "replayed": "Replayed",
+        "discarded": "Discarded",
+        "activity": "Activity",
+        "actor": "Actor",
+        "error": "Error",
+        "attempts": "Attempts",
+        "parked_at": "Parked At",
+        "message_type": "Message Type",
+        "body": "Message Body",
+        "replay": "Replay",
+        "discard": "Discard",
+        "discard_confirm": "Discard this message? It will not be processed again.",
+        "empty": "No messages"
+      }
     },
     "domainBlocks": "Domain blocks",
     "emailDomainBlocks": "Email domain blocks",
@@ -679,9 +733,13 @@
       "terms_of_service": "Terms of Service",
       "terms_of_service_desc": "Write your terms of service in Markdown.",
       "privacy_policy": "Privacy Policy",
-      "privacy_policy_desc": "Write your privacy policy in Markdown."
+      "privacy_policy_desc": "Write your privacy policy in Markdown.",
+      "accent_color": "Deck accent color"
     },
-    "registration_message_help": "This message is shown to users on the registration page."
+    "registration_message_help": "This message is shown to users on the registration page.",
+    "vapid_public_key_placeholder": "Base64url-encoded P-256 public key (65 bytes)",
+    "vapid_private_key_placeholder": "Base64url-encoded P-256 private key (32 bytes)",
+    "accent_color_hint": "Used across the Deck UI for every visitor (buttons, active states, live indicators)."
   },
   "legal": {
     "terms_of_service": "Terms of Service",
@@ -818,7 +876,8 @@
     "backup_codes_description": "Save these backup codes in a safe place. Each code can only be used once.",
     "backup_codes_warning": "These codes will not be shown again.",
     "invalid_code": "Invalid code. Please try again.",
-    "copied": "Copied!"
+    "copied": "Copied!",
+    "qr_alt": "TOTP QR code"
   },
   "turnstile": {
     "title": "Turnstile (CAPTCHA)",
@@ -916,6 +975,273 @@
       "write:reports": "Submit reports",
       "admin:read": "View admin data",
       "admin:write": "Modify admin data"
+    }
+  },
+  "design": {
+    "classicBanner": "You're viewing the classic design",
+    "switchToNew": "Try the new look",
+    "backToClassic": "Classic design",
+    "auroraBanner": "You are viewing the Aurora design."
+  },
+  "setup": {
+    "subtitle": "Create the first administrator account.",
+    "unavailable": "Initial setup is no longer available because a user already exists.",
+    "admin_username": "Admin username",
+    "admin_email": "Admin email",
+    "password": "Password",
+    "confirm_password": "Confirm password",
+    "create": "Create admin",
+    "creating": "Creating...",
+    "create_failed": "Failed to create the admin account.",
+    "username_required": "Please enter a username.",
+    "username_invalid": "Usernames can only contain letters, numbers, and underscores.",
+    "email_required": "Please enter an email address.",
+    "password_required": "Please enter a password.",
+    "password_too_short": "Password must be at least 8 characters long.",
+    "password_mismatch": "Passwords do not match."
+  },
+  "deck": {
+    "col_home": "home",
+    "col_local": "local",
+    "col_federated": "federated",
+    "scope_following": "following",
+    "scope_federated": "known network",
+    "live": "LIVE",
+    "streaming": "streaming",
+    "note": "Note",
+    "columns_empty": "All columns are hidden. Toggle a timeline back on from the rail.",
+    "toggle_column": "Toggle {name} column",
+    "design_aurora": "Aurora UI",
+    "design_classic": "Classic UI",
+    "deck": "deck",
+    "columns_short": "cols",
+    "columns_title": "Deck columns",
+    "col_notifications": "alerts",
+    "move_up": "Move up",
+    "move_down": "Move down",
+    "drag_to_reorder": "Drag to reorder",
+    "live_toggle": "Toggle live updates",
+    "react": "React with emoji",
+    "unboost": "Undo boost",
+    "unfavourite": "Remove favourite",
+    "remote_reaction_hint": "Emoji from another server",
+    "col_search": "search",
+    "col_requests": "follow requests",
+    "unbookmark": "Remove bookmark",
+    "col_social": "social",
+    "scope_social": "home + local",
+    "scope_alerts": "activity",
+    "scope_requests": "follow requests",
+    "scope_search": "everywhere",
+    "nav_home": "Home",
+    "nav_social": "Social",
+    "nav_local": "Local",
+    "nav_federated": "Federated",
+    "nav_alerts": "Alerts",
+    "nav_requests": "Requests",
+    "section_timelines": "timelines"
+  },
+  "airport": {
+    "pageTitle": "{name} Airport — a live map of this server",
+    "title": "{name} Airport",
+    "subtitle": "The last 24 hours of this server, run as a working airport. Every path matches the real wiring, and every number is real.",
+    "asOf": "as of {time}",
+    "status": {
+      "live": "live feed",
+      "lastKnown": "last-known",
+      "connecting": "connecting"
+    },
+    "sceneLabel": "Live airport simulation of the server pipeline",
+    "cards": {
+      "departures": "Departures",
+      "arrivals": "Arrivals",
+      "transfers": "Transfers",
+      "cargoOut": "Cargo out",
+      "cargoIn": "Cargo in",
+      "passports": "New passports",
+      "items": "{count} items"
+    },
+    "scene": {
+      "sky": "Federated sky",
+      "runwayDep": "Departure runway",
+      "runwayDepSub": "(federation out)",
+      "runwayArr": "Arrival runway",
+      "runwayArrSub": "(inbox)",
+      "tower": "Control tower",
+      "towerSub": "(ops · queue)",
+      "towerLine": "{movements} movements · dlq {dlq}",
+      "dlqClear": "clear",
+      "cargo": "Cargo terminal (R2)",
+      "cargoSub": "belly cargo · media",
+      "city": "CITY",
+      "landsideDep": "DEPARTURES · landside",
+      "landsideArr": "ARRIVALS · landside",
+      "cloudflare": "Cloudflare gate",
+      "checkin": "Check-in",
+      "security": "Security",
+      "passport": "Passport control",
+      "boarding": "Boarding ↑",
+      "arrivalsDown": "↓ Arrivals",
+      "announce": "Announcements",
+      "announceSub": "(streaming)",
+      "today": "today",
+      "exit": "Exit",
+      "baggage": "Baggage claim",
+      "immigration": "Immigration",
+      "immigrationSub": "(signature)",
+      "dlqHolding": "DLQ holding",
+      "gateA1": "A1 · departures",
+      "gateA2": "A2 · arrivals"
+    },
+    "info": {
+      "default": {
+        "title": "{name} Airport",
+        "body": "Every facility on this map is a real part of this server's fediverse pipeline. Hover anything to see which part it is.",
+        "stat": "24h · live"
+      },
+      "cloudflare": {
+        "title": "Cloudflare gate",
+        "body": "The edge. Every HTTP request from the fediverse and from browsers reaches this server through Cloudflare's network first.",
+        "stat": "edge"
+      },
+      "checkin": {
+        "title": "Check-in",
+        "body": "The rate limiter. It caps how often a single client can hit the API, so bursts never crush the server.",
+        "stat": "rate limit"
+      },
+      "security": {
+        "title": "Security",
+        "body": "Bot defense (Turnstile). AI crawlers and spam bots are turned away here; real people pass straight through.",
+        "stat": "anti-bot"
+      },
+      "passport": {
+        "title": "Passport control",
+        "body": "Authentication. Your login session or app's OAuth token is verified here before any write reaches the server.",
+        "stat": "auth"
+      },
+      "gate": {
+        "title": "Aircraft stands",
+        "body": "The federation queue. A freshly published post waits here as a delivery job (QUEUE_FEDERATION) until the queue-consumer flies it out.",
+        "stat": "queue"
+      },
+      "immigration": {
+        "title": "Immigration",
+        "body": "Inbound HTTP-signature verification. Every activity that arrives in the inbox is checked to prove it really came from the server it claims.",
+        "stat": "{arrivals} cleared"
+      },
+      "baggage": {
+        "title": "Baggage claim",
+        "body": "Remote media. Attachments that ride along with federated posts are fetched and served through the media proxy.",
+        "stat": "attachments"
+      },
+      "exit": {
+        "title": "Exit",
+        "body": "The timeline. A verified remote post leaves the pipeline here and appears in local feeds.",
+        "stat": "timeline"
+      },
+      "cargo": {
+        "title": "Cargo terminal (R2)",
+        "body": "Object storage (R2 MEDIA_BUCKET). Every uploaded image, video, and audio file lives here — media never travels with the post itself.",
+        "stat": "in {cargoIn} · out {cargoOut}"
+      },
+      "announce": {
+        "title": "Announcements (streaming)",
+        "body": "The streaming service (a Durable Object). It pushes new posts and notifications over WebSocket to every connected client in real time.",
+        "stat": "{announceN} today"
+      },
+      "tower": {
+        "title": "Control tower (ops)",
+        "body": "The queue-consumer worker. It processes the federation queue in order, signs activities, delivers them, and records success or failure per server.",
+        "stat": "{movements} movements"
+      },
+      "dlq": {
+        "title": "DLQ holding apron",
+        "body": "The dead-letter backlog (federation_dlq_parked). Deliveries that exhausted every retry park here until an admin replays or clears them — red means something is not landing.",
+        "statEmpty": "empty · good",
+        "statWaiting": "{dlq} waiting"
+      },
+      "deprwy": {
+        "title": "Departure runway 09L",
+        "body": "Federation out. The queue-consumer signs each ActivityPub activity and POSTs it to the destination server's inbox — straight out, not back through Cloudflare.",
+        "stat": "{departures} departed"
+      },
+      "arrrwy": {
+        "title": "Arrival runway 09R",
+        "body": "Federation in — this server's shared inbox. Activities that other servers send land here.",
+        "stat": "{arrivals} landed"
+      },
+      "beaconBody": "Another fediverse server this one federates with. Beacon size is how many posts arrived from it in the last 24 hours.",
+      "beaconStat": "{count} arrived"
+    },
+    "ops": {
+      "title": "Operations",
+      "gate": {
+        "title": "Front gate & terminal",
+        "status": "Open",
+        "desc": "The front door between you and {title} — this very page came through it. New posts (departing passengers): {departures} in the last day."
+      },
+      "federation": {
+        "title": "International routes (federation)",
+        "statusOk": "Operating",
+        "statusDelayed": "Partial delays",
+        "desc": "{arrivals} passengers arrived from {destinations} airports in the last day. New posts check in here for departure into the federated sky.",
+        "delayedNote": "These routes have accumulated delivery failures:",
+        "failures": "{count} failed deliveries"
+      },
+      "transfer": {
+        "title": "Transfer corridor",
+        "status": "Open",
+        "desc": "{transfers} arriving passengers took the transfer corridor back to a departure gate in the last day. Boosts travel this way."
+      },
+      "cargo": {
+        "title": "Cargo terminal (R2)",
+        "status": "Operating",
+        "desc": "{out} checked bags ({bytes}) entered the warehouse and {in} arriving bags reached baggage claim in the last day."
+      },
+      "passport": {
+        "title": "Passport desk",
+        "status": "Open",
+        "desc": "{count} new passports were issued in the last day. A new account is a new passport."
+      },
+      "tower": {
+        "title": "Control tower broadcast",
+        "status": "On air",
+        "desc": "When a new post lands, the tower announces it straight to connected screens. {total} announcements in the last day."
+      },
+      "dlq": {
+        "title": "Grounded cargo yard",
+        "statusEmpty": "Empty",
+        "statusParked": "{count} grounded",
+        "emptyDesc": "The yard is completely empty. That's good news.",
+        "parkedDesc": "{count} deliveries never made it and are parked in the yard. An admin can replay or clear them."
+      }
+    },
+    "story": {
+      "title": "How the airport runs",
+      "p1": {
+        "lead": "Every facility is a real component.",
+        "body": "This is the server's actual pipeline drawn as an airport: nothing on the map exists that isn't real wiring, and every real path is drawn. The aircraft are ambience; the numbers are not."
+      },
+      "p2": {
+        "lead": "Landside is the request pipeline.",
+        "body": "Every request enters through the Cloudflare edge, then passes the rate limiter (check-in), bot defense (security), and authentication (passport control) before it can do anything — the exact order of the real middleware."
+      },
+      "p3": {
+        "lead": "Cargo is media.",
+        "body": "Images and videos never travel inside a post. They live in R2 object storage (the cargo terminal) and move separately — uploads on the way out, remote attachments fetched through the media proxy on the way in."
+      },
+      "p4": {
+        "lead": "Arrivals are federation in.",
+        "body": "Posts from other servers land in the shared inbox (09R), have their HTTP signatures verified (immigration), and only then enter local timelines (the exit)."
+      },
+      "p5": {
+        "lead": "Announcements are the streaming service.",
+        "body": "A Durable Object holds a WebSocket to every open client and pushes new posts and notifications the moment they happen."
+      },
+      "p6": {
+        "lead": "Tower & DLQ.",
+        "body": "The control tower is the queue-consumer: it works through the federation queue and logs delivery success or failure per server. Deliveries that exhaust all retries park in the dead-letter table (DLQ holding) for the admin to replay. Counts refresh about once a minute; no accounts, recipients, or content included."
+      }
     }
   }
 }

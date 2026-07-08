@@ -3,34 +3,86 @@ import { ref, computed, watchEffect } from 'vue';
 import { getPreferences, updatePreferences } from '@/api/mastodon/preferences';
 
 export type Theme = 'light' | 'dark' | 'system';
-export type ColumnType = 'home' | 'local' | 'federated' | 'notifications';
+export type ColumnType =
+  | 'home'
+  | 'social'
+  | 'local'
+  | 'federated'
+  | 'notifications'
+  | 'search'
+  | 'follow_requests';
 
 const THEME_KEY = 'siliconbeest_theme';
+const MOBILE_COLUMN_KEY = 'siliconbeest_mobile_column';
 const DEFAULT_COLUMNS: ColumnType[] = ['home', 'local', 'federated'];
+/** Column types the Aurora design's mobile deck can render. */
+export const ALL_COLUMNS: ColumnType[] = ['home', 'local', 'federated', 'notifications'];
+/** Every column type (superset — the deck design supports them all). */
+const VALID_MOBILE_COLUMNS: ColumnType[] = [
+  'home',
+  'social',
+  'local',
+  'federated',
+  'notifications',
+  'search',
+  'follow_requests',
+];
+
+function loadMobileColumn(): ColumnType {
+  if (typeof localStorage === 'undefined') return 'home';
+  const stored = localStorage.getItem(MOBILE_COLUMN_KEY) as ColumnType | null;
+  return stored && VALID_MOBILE_COLUMNS.includes(stored) ? stored : 'home';
+}
+
+function persistTheme(theme: Theme) {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(THEME_KEY, theme);
+  }
+  if (typeof document !== 'undefined') {
+    document.cookie = `${THEME_KEY}=${encodeURIComponent(theme)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+  }
+}
 
 export const useUiStore = defineStore('ui', () => {
-  const theme = ref<Theme>((localStorage.getItem(THEME_KEY) as Theme) || 'system');
+  const theme = ref<Theme>(
+    typeof localStorage === 'undefined'
+      ? 'system'
+      : ((localStorage.getItem(THEME_KEY) as Theme) || 'system'),
+  );
   const sidebarOpen = ref(false);
-  const isMobile = ref(window.innerWidth < 768);
+  // Mirror Tailwind's `md` breakpoint with matchMedia rather than
+  // window.innerWidth: on mobile browsers the layout viewport can report a
+  // desktop-ish width (e.g. 980px) while the CSS media queries already
+  // resolve against the device width, which left isMobile=false on phones
+  // and rendered the desktop deck there.
+  const MOBILE_MEDIA_QUERY = '(max-width: 767px)';
+  const isMobile = ref(
+    typeof window !== 'undefined' ? window.matchMedia(MOBILE_MEDIA_QUERY).matches : false,
+  );
   const composeModalOpen = ref(false);
   const mediaViewerOpen = ref(false);
   const mediaViewerIndex = ref(0);
   const mediaViewerItems = ref<string[]>([]);
   const columns = ref<ColumnType[]>([...DEFAULT_COLUMNS]);
+  // Mobile deck: which column is shown, and whether the column picker sheet is open
+  const mobileColumn = ref<ColumnType>(loadMobileColumn());
+  const deckMenuOpen = ref(false);
   const showTrending = ref(true);
   const serverLoaded = ref(false);
   const saving = ref(false);
 
   const isDark = computed(() => {
     if (theme.value === 'system') {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+      return typeof window !== 'undefined'
+        ? window.matchMedia('(prefers-color-scheme: dark)').matches
+        : false;
     }
     return theme.value === 'dark';
   });
 
   function setTheme(newTheme: Theme) {
     theme.value = newTheme;
-    localStorage.setItem(THEME_KEY, newTheme);
+    persistTheme(newTheme);
   }
 
   function toggleSidebar() {
@@ -39,6 +91,22 @@ export const useUiStore = defineStore('ui', () => {
 
   function closeSidebar() {
     sidebarOpen.value = false;
+  }
+
+  function setMobileColumn(type: ColumnType) {
+    mobileColumn.value = type;
+    deckMenuOpen.value = false;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(MOBILE_COLUMN_KEY, type);
+    }
+  }
+
+  function toggleDeckMenu() {
+    deckMenuOpen.value = !deckMenuOpen.value;
+  }
+
+  function closeDeckMenu() {
+    deckMenuOpen.value = false;
   }
 
   function openComposeModal() {
@@ -132,20 +200,25 @@ export const useUiStore = defineStore('ui', () => {
 
   // Apply dark class to <html>
   watchEffect(() => {
-    document.documentElement.classList.toggle('dark', isDark.value);
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.toggle('dark', isDark.value);
+      document.documentElement.style.colorScheme = isDark.value ? 'dark' : 'light';
+    }
   });
 
-  // Track window resize
-  function handleResize() {
-    isMobile.value = window.innerWidth < 768;
-    if (!isMobile.value) {
-      sidebarOpen.value = false;
-    }
-  }
-
-  // Call on init
+  // Track viewport changes via the same media query CSS uses
   if (typeof window !== 'undefined') {
-    window.addEventListener('resize', handleResize);
+    const mediaQuery = window.matchMedia(MOBILE_MEDIA_QUERY);
+    const syncIsMobile = () => {
+      isMobile.value = mediaQuery.matches;
+      if (!mediaQuery.matches) {
+        sidebarOpen.value = false;
+      }
+    };
+    syncIsMobile();
+    mediaQuery.addEventListener('change', syncIsMobile);
+    // Fallback for environments where the media query result settles late
+    window.addEventListener('resize', syncIsMobile);
   }
 
   return {
@@ -165,6 +238,11 @@ export const useUiStore = defineStore('ui', () => {
     openMediaViewer,
     closeMediaViewer,
     columns,
+    mobileColumn,
+    deckMenuOpen,
+    setMobileColumn,
+    toggleDeckMenu,
+    closeDeckMenu,
     showTrending,
     serverLoaded,
     saving,

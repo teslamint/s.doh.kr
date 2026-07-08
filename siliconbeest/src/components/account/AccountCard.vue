@@ -7,17 +7,11 @@ import { useAuthStore } from '@/stores/auth'
 import { useAccountsStore } from '@/stores/accounts'
 import Avatar from '../common/Avatar.vue'
 import FollowButton from './FollowButton.vue'
+import { emojifyPlainText } from '@/utils/customEmoji'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const accountsStore = useAccountsStore()
-
-function emojifyText(text: string, emojis?: Array<{ shortcode: string; url: string }>): string {
-  if (!emojis || emojis.length === 0 || !text) return text
-  let r = text
-  for (const e of emojis) r = r.replace(new RegExp(`:${e.shortcode}:`, 'g'), `<img src="${e.url}" alt=":${e.shortcode}:" class="inline-block h-5 w-5 align-text-bottom" draggable="false" />`)
-  return r
-}
 
 const props = defineProps<{
   account: {
@@ -32,7 +26,11 @@ const props = defineProps<{
   relationship?: Relationship
 }>()
 
-const emojifiedName = computed(() => emojifyText(props.account.display_name || props.account.acct, props.account.emojis))
+const emojifiedName = computed(() => emojifyPlainText(
+  props.account.display_name || props.account.acct,
+  props.account.emojis,
+  'custom-emoji inline-block h-5 max-w-8 align-text-bottom',
+))
 
 async function handleToggle() {
   if (!auth.token) return
@@ -49,15 +47,15 @@ async function handleToggle() {
 </script>
 
 <template>
-  <div class="flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-    <router-link :to="`/@${account.acct}`" class="flex-shrink-0 w-10 h-10">
+  <div class="flex items-center gap-3 p-3 transition-colors hover:bg-surface-2/70 dark:hover:bg-surface-2-dark/60">
+    <router-link :to="`/@${account.acct}`" class="h-10 w-10 flex-shrink-0">
       <Avatar :src="account.avatar" :alt="account.display_name" size="md" />
     </router-link>
 
-    <div class="flex-1 min-w-0">
+    <div class="min-w-0 flex-1">
       <router-link :to="`/@${account.acct}`" class="block">
-        <p class="font-semibold text-sm truncate hover:underline" v-html="emojifiedName" />
-        <p class="text-xs text-gray-500 dark:text-gray-400 truncate">@{{ account.acct }}</p>
+        <p class="truncate text-sm font-semibold text-slate-900 hover:underline dark:text-slate-100" v-html="emojifiedName" />
+        <p class="truncate text-xs text-slate-500 dark:text-slate-400">@{{ account.acct }}</p>
       </router-link>
     </div>
 
@@ -67,7 +65,7 @@ async function handleToggle() {
       :following="accountsStore.getRelationship(account.id)?.following"
       :requested="accountsStore.getRelationship(account.id)?.requested"
       :blocked="accountsStore.getRelationship(account.id)?.blocking"
-      class="flex-shrink-0"
+      class="sb-btn-sm flex-shrink-0"
       @toggle="handleToggle"
     />
   </div>

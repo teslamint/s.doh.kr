@@ -1,10 +1,10 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "siliconbeest",
-	"compatibility_date": "2026-03-17",
-	"main": "server/index.ts",
+	"compatibility_date": "2026-06-16",
+	"main": ".output/server/index.mjs",
 	"assets": {
-		"directory": "./dist/client",
+		"directory": "./.output/public",
 		"not_found_handling": "none",
 		"binding": "ASSETS"
 	},
@@ -32,6 +32,7 @@
 	"vars": {
 		"INSTANCE_DOMAIN": "social.example.com",
 		"INSTANCE_TITLE": "My SiliconBeest Instance",
+		"REPOSITORY_URL": "https://github.com/SJang1/siliconbeest",
 		"REGISTRATION_MODE": "open",
 		"SKIP_SIGNATURE_VERIFICATION": true
 	},

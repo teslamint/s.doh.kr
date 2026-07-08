@@ -11,6 +11,14 @@ import { getNotification } from '../../../../services/notification';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
+function formatEmojiUrl(imageKey: string, emojiDomain: string | null, instanceDomain: string): string {
+  if (!emojiDomain || emojiDomain === instanceDomain) {
+    return imageKey.startsWith('http') ? imageKey : `https://${instanceDomain}/media/${imageKey}`;
+  }
+  const originalUrl = imageKey.startsWith('http') ? imageKey : `https://${emojiDomain}/${imageKey}`;
+  return `https://${instanceDomain}/proxy?url=${encodeURIComponent(originalUrl)}`;
+}
+
 app.get('/:id', authRequired, requireScope('read:notifications'), async (c) => {
   const account = c.get('currentAccount')!;
   const domain = env.INSTANCE_DOMAIN;
@@ -56,6 +64,7 @@ app.get('/:id', authRequired, requireScope('read:notifications'), async (c) => {
     favourites_count: number;
     replies_count: number;
     edited_at: string | null;
+    quote_policy: string | null;
     sa_id: string;
     sa_username: string;
     sa_domain: string | null;
@@ -85,7 +94,7 @@ app.get('/:id', authRequired, requireScope('read:notifications'), async (c) => {
       `SELECT s.id, s.uri, s.url, s.content, s.visibility, s.sensitive,
               s.content_warning, s.language, s.created_at, s.in_reply_to_id,
               s.in_reply_to_account_id, s.reblogs_count, s.favourites_count,
-              s.replies_count, s.edited_at,
+              s.replies_count, s.edited_at, s.quote_policy,
               sa.id AS sa_id, sa.username AS sa_username, sa.domain AS sa_domain,
               sa.display_name AS sa_display_name, sa.note AS sa_note,
               sa.uri AS sa_uri, sa.url AS sa_url,
@@ -140,6 +149,10 @@ app.get('/:id', authRequired, requireScope('read:notifications'), async (c) => {
         muted: false,
         pinned: false,
         reblog: null,
+        quote: e?.quote ?? null,
+        quote_policy: sr.quote_policy === 'followers' || sr.quote_policy === 'nobody' ? sr.quote_policy : 'public',
+        quote_policy_allows: e?.quotePolicyAllows ?? true,
+        quote_policy_reason: e?.quotePolicyReason ?? null,
         poll: null,
         card: e?.card ?? null,
         application: null,
@@ -161,14 +174,20 @@ app.get('/:id', authRequired, requireScope('read:notifications'), async (c) => {
   // Attach custom emoji URL for emoji_reaction notifications
   if (notifRow.type === 'emoji_reaction' && notifRow.emoji?.startsWith(':') && notifRow.emoji?.endsWith(':')) {
     const sc = notifRow.emoji.slice(1, -1);
-    const er = await env.DB.prepare(
-      'SELECT domain, image_key FROM custom_emojis WHERE shortcode = ?1 LIMIT 1',
-    ).bind(sc).first<{ domain: string | null; image_key: string }>();
+    let er = row.status_id
+      ? await env.DB.prepare(
+        `SELECT ce.domain, ce.image_key
+         FROM emoji_reactions er
+         JOIN custom_emojis ce ON ce.id = er.custom_emoji_id
+         WHERE er.status_id = ?1 AND er.account_id = ?2 AND er.emoji = ?3
+         LIMIT 1`,
+      ).bind(row.status_id, row.from_account_id, notifRow.emoji).first<{ domain: string | null; image_key: string }>()
+      : null;
+    er ??= await env.DB.prepare(
+        'SELECT domain, image_key FROM custom_emojis WHERE shortcode = ?1 LIMIT 1',
+      ).bind(sc).first<{ domain: string | null; image_key: string }>();
     if (er) {
-      const isLocal = !er.domain || er.domain === env.INSTANCE_DOMAIN;
-      (notif as Record<string, unknown>).emoji_url = isLocal
-        ? `https://${env.INSTANCE_DOMAIN}/media/${er.image_key}`
-        : `https://${env.INSTANCE_DOMAIN}/proxy?url=${encodeURIComponent(er.image_key)}`;
+      (notif as Record<string, unknown>).emoji_url = formatEmojiUrl(er.image_key, er.domain, env.INSTANCE_DOMAIN);
     }
   }
   return c.json(notif);

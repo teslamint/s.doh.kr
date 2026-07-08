@@ -254,7 +254,10 @@ export async function createDomainBlock(
 		obfuscate?: boolean;
 	},
 ): Promise<Record<string, unknown>> {
-	const existing = await env.DB.prepare('SELECT id FROM domain_blocks WHERE domain = ?1').bind(data.domain).first();
+	// Domains are DNS names (case-insensitive): store lowercase so enforcement
+	// in isDomainBlocked — which compares lowercased input — actually matches.
+	const domain = data.domain.trim().toLowerCase();
+	const existing = await env.DB.prepare('SELECT id FROM domain_blocks WHERE domain = ?1').bind(domain).first();
 	if (existing) throw new AppError(422, 'Domain block already exists');
 
 	const id = generateUlid();
@@ -265,7 +268,7 @@ export async function createDomainBlock(
 		`INSERT INTO domain_blocks (id, domain, severity, reject_media, reject_reports, private_comment, public_comment, obfuscate, created_at, updated_at)
 		 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
 	).bind(
-		id, data.domain, severity,
+		id, domain, severity,
 		data.reject_media ? 1 : 0, data.reject_reports ? 1 : 0,
 		data.private_comment || null, data.public_comment || null,
 		data.obfuscate ? 1 : 0, now, now,
@@ -333,6 +336,9 @@ export async function getDomainAllow(id: string): Promise<Record<string, unknown
 }
 
 export async function createDomainAllow(domain: string): Promise<Record<string, unknown>> {
+	// Domains are DNS names (case-insensitive): store lowercase, matching the
+	// comparison convention of isDomainBlocked/isEmailDomainBlocked.
+	domain = domain.trim().toLowerCase();
 	const existing = await env.DB.prepare('SELECT id FROM domain_allows WHERE domain = ?1').bind(domain).first();
 	if (existing) throw new AppError(422, 'Domain allow already exists');
 
@@ -433,6 +439,10 @@ export async function getEmailDomainBlock(id: string): Promise<Record<string, un
 }
 
 export async function createEmailDomainBlock(domain: string): Promise<Record<string, unknown>> {
+	// Email domains are DNS names (case-insensitive): store lowercase so the
+	// signup-side check in isEmailDomainBlocked — which compares lowercased
+	// input — actually matches.
+	domain = domain.trim().toLowerCase();
 	const existing = await env.DB.prepare('SELECT id FROM email_domain_blocks WHERE domain = ?1').bind(domain).first();
 	if (existing) throw new AppError(422, 'Email domain block already exists');
 
@@ -765,4 +775,66 @@ export async function getFederationStats(): Promise<{
 		unreachable_instances: unreachableInstances?.cnt ?? 0,
 		remote_accounts: remoteAccounts?.cnt ?? 0,
 	};
+}
+
+// ----------------------------------------------------------------
+// Federation DLQ (parked dead-letter messages)
+// ----------------------------------------------------------------
+
+export interface DlqParkedRow {
+	id: string;
+	queue: string;
+	message_id: string | null;
+	body: string;
+	message_type: string | null;
+	activity_type: string | null;
+	activity_id: string | null;
+	actor: string | null;
+	error: string | null;
+	attempts: number;
+	status: string;
+	parked_at: string;
+	updated_at: string;
+}
+
+export async function listDlqParked(options: {
+	status?: string;
+	limit: number;
+	offset: number;
+}): Promise<{ items: DlqParkedRow[]; counts: Record<string, number> }> {
+	const status = options.status ?? 'parked';
+	const [{ results }, { results: countRows }] = await Promise.all([
+		env.DB.prepare(
+			`SELECT * FROM federation_dlq_parked
+			 WHERE status = ?1
+			 ORDER BY parked_at DESC
+			 LIMIT ?2 OFFSET ?3`,
+		).bind(status, options.limit, options.offset).all<DlqParkedRow>(),
+		env.DB.prepare(
+			'SELECT status, COUNT(*) AS cnt FROM federation_dlq_parked GROUP BY status',
+		).all<{ status: string; cnt: number }>(),
+	]);
+	const counts: Record<string, number> = Object.fromEntries(
+		(countRows ?? []).map((row) => [row.status, row.cnt]),
+	);
+	return { items: results ?? [], counts };
+}
+
+export async function getDlqParked(id: string): Promise<DlqParkedRow> {
+	const row = await env.DB.prepare('SELECT * FROM federation_dlq_parked WHERE id = ?1')
+		.bind(id)
+		.first<DlqParkedRow>();
+	if (!row) throw new AppError(404, 'Parked message not found');
+	return row;
+}
+
+export async function markDlqParked(
+	id: string,
+	status: 'replayed' | 'discarded',
+): Promise<void> {
+	await env.DB.prepare(
+		'UPDATE federation_dlq_parked SET status = ?2, updated_at = ?3 WHERE id = ?1',
+	)
+		.bind(id, status, new Date().toISOString())
+		.run();
 }

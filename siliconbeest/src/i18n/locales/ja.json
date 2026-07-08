@@ -16,7 +16,12 @@
     "copied": "クリップボードにコピーしました",
     "upload": "アップロード",
     "uploading": "アップロード中...",
-    "load_more": "もっと見る"
+    "load_more": "もっと見る",
+    "previous": "前へ",
+    "remove": "削除",
+    "move_up": "上に移動",
+    "move_down": "下に移動",
+    "auto": "自動"
   },
   "auth": {
     "login": "ログイン",
@@ -121,7 +126,16 @@
     "poll_multiple": "複数選択",
     "poll_minutes": "分",
     "poll_hours": "時間",
-    "poll_days": "日"
+    "poll_days": "日",
+    "post_visibility_label": "投稿の公開範囲",
+    "quote_permission_label": "引用許可",
+    "post_language_label": "投稿の言語",
+    "quote_policy": {
+      "label": "引用ポリシー",
+      "public": "全員に許可",
+      "followers": "フォロワーのみ",
+      "nobody": "許可しない"
+    }
   },
   "poll": {
     "vote": "投票",
@@ -156,7 +170,10 @@
     "followed_tags": "フォロー中のハッシュタグ",
     "directory": "ディレクトリ",
     "local_timeline": "ローカルタイムライン",
-    "federated_timeline": "連合タイムライン"
+    "federated_timeline": "連合タイムライン",
+    "main_navigation": "メインナビゲーション",
+    "mobile_navigation": "モバイルナビゲーション",
+    "social_timeline": "ソーシャルタイムライン"
   },
   "explore": {
     "trending": "トレンド",
@@ -181,7 +198,11 @@
   "status": {
     "reply": "返信",
     "boost": "ブースト",
+    "unboost": "ブースト解除",
+    "quote": "引用",
     "favourite": "お気に入り",
+    "unfavourite": "お気に入り解除",
+    "react": "絵文字でリアクション",
     "bookmark": "ブックマーク",
     "share": "共有",
     "copyLink": "リンクをコピー",
@@ -216,7 +237,13 @@
     "visibility_direct": "ダイレクトメッセージ",
     "report": "報告",
     "reblogged": "ブーストしました",
-    "cannot_boost": "この投稿はブーストできません"
+    "cannot_boost": "この投稿はブーストできません",
+    "cannot_quote": "この投稿は引用できません",
+    "cannot_quote_visibility": "公開または未収載の投稿のみ引用できます",
+    "cannot_quote_policy_nobody": "投稿者がこの投稿の引用を許可していません",
+    "cannot_quote_followers_only": "投稿者のフォロワーのみこの投稿を引用できます",
+    "cannot_quote_following_only": "投稿者がフォローしているユーザーのみこの投稿を引用できます",
+    "cannot_quote_login_required": "フォロワーとしてログインすると引用できます"
   },
   "notification": {
     "title": "通知",
@@ -364,6 +391,14 @@
     "posting": "投稿",
     "posting_default_visibility": "デフォルトの公開範囲",
     "posting_default_visibility_desc": "新しい投稿はデフォルトでこの公開範囲を使用します。スレッドへの返信時は、親投稿の公開範囲以下に制限されます。",
+    "default_quote_policy": "デフォルト引用ポリシー",
+    "default_quote_policy_desc": "新しい投稿を引用できる範囲のデフォルトを選択します。",
+    "quote_policy_public": "全員に許可",
+    "quote_policy_public_desc": "誰でもこの投稿を引用できます。",
+    "quote_policy_followers": "フォロワーのみ",
+    "quote_policy_followers_desc": "あなたのフォロワーのみこの投稿を引用できます。",
+    "quote_policy_nobody": "許可しない",
+    "quote_policy_nobody_desc": "あなた以外はこの投稿を引用できません。",
     "posting_visibility_saved": "デフォルトの公開範囲を保存しました。",
     "columns": "カラム",
     "columns_desc": "ワイドスクリーンでホームタイムラインの横に表示するカラムを選択してください。",
@@ -406,7 +441,26 @@
       "detail": "インスタンスの詳細",
       "registrations": "登録受付中",
       "first_seen": "初回確認",
-      "description": "説明"
+      "description": "説明",
+      "dlq": {
+        "title": "デッドレターキュー",
+        "link": "失敗メッセージ",
+        "description": "再試行をすべて使い切った連合メッセージです。再送はキューに再投入し、破棄は処理済みとして扱います。",
+        "parked": "保管中",
+        "replayed": "再送済み",
+        "discarded": "破棄済み",
+        "activity": "アクティビティ",
+        "actor": "アクター",
+        "error": "エラー",
+        "attempts": "試行回数",
+        "parked_at": "保管日時",
+        "message_type": "メッセージ種別",
+        "body": "メッセージ本文",
+        "replay": "再送",
+        "discard": "破棄",
+        "discard_confirm": "このメッセージを破棄しますか？再処理されません。",
+        "empty": "メッセージはありません"
+      }
     },
     "domainBlocks": "ドメインブロック",
     "emailDomainBlocks": "メールドメインブロック",
@@ -679,9 +733,13 @@
       "terms_of_service": "利用規約",
       "terms_of_service_desc": "Markdownで利用規約を記述してください。",
       "privacy_policy": "プライバシーポリシー",
-      "privacy_policy_desc": "Markdownでプライバシーポリシーを記述してください。"
+      "privacy_policy_desc": "Markdownでプライバシーポリシーを記述してください。",
+      "accent_color": "Deck アクセントカラー"
     },
-    "registration_message_help": "このメッセージは登録ページでユーザーに表示されます。"
+    "registration_message_help": "このメッセージは登録ページでユーザーに表示されます。",
+    "vapid_public_key_placeholder": "Base64urlエンコードされたP-256公開鍵（65バイト）",
+    "vapid_private_key_placeholder": "Base64urlエンコードされたP-256秘密鍵（32バイト）",
+    "accent_color_hint": "すべての訪問者の Deck UI(ボタン、アクティブ状態、ライブ表示)に適用されます。"
   },
   "legal": {
     "terms_of_service": "利用規約",
@@ -818,7 +876,8 @@
     "backup_codes_description": "これらのバックアップコードを安全な場所に保存してください。各コードは一度だけ使用できます。",
     "backup_codes_warning": "これらのコードは再表示されません。",
     "invalid_code": "無効なコードです。もう一度お試しください。",
-    "copied": "コピーしました！"
+    "copied": "コピーしました！",
+    "qr_alt": "TOTP QRコード"
   },
   "turnstile": {
     "title": "Turnstile（CAPTCHA）",
@@ -916,6 +975,273 @@
       "write:reports": "報告の送信",
       "admin:read": "管理データの閲覧",
       "admin:write": "管理データの変更"
+    }
+  },
+  "design": {
+    "classicBanner": "クラシックデザインを表示中です",
+    "switchToNew": "新しいデザインを試す",
+    "backToClassic": "クラシックデザイン",
+    "auroraBanner": "Aurora デザインを表示しています。"
+  },
+  "setup": {
+    "subtitle": "最初の管理者アカウントを作成します。",
+    "unavailable": "すでにユーザーが作成されているため、初期セットアップは利用できません。",
+    "admin_username": "管理者ユーザー名",
+    "admin_email": "管理者メールアドレス",
+    "password": "パスワード",
+    "confirm_password": "パスワード（確認）",
+    "create": "管理者を作成",
+    "creating": "作成中...",
+    "create_failed": "管理者の作成に失敗しました。",
+    "username_required": "ユーザー名を入力してください。",
+    "username_invalid": "ユーザー名には英数字とアンダースコアのみ使用できます。",
+    "email_required": "メールアドレスを入力してください。",
+    "password_required": "パスワードを入力してください。",
+    "password_too_short": "パスワードは8文字以上である必要があります。",
+    "password_mismatch": "パスワードが一致しません。"
+  },
+  "deck": {
+    "col_home": "home",
+    "col_local": "local",
+    "col_federated": "federated",
+    "scope_following": "フォロー中",
+    "scope_federated": "既知のネットワーク",
+    "live": "LIVE",
+    "streaming": "ストリーミング",
+    "note": "ノート",
+    "columns_empty": "すべてのカラムが非表示です。レールからタイムラインを再表示してください。",
+    "toggle_column": "{name} カラムの表示切替",
+    "design_aurora": "Aurora UI",
+    "design_classic": "クラシック UI",
+    "deck": "デッキ",
+    "columns_short": "カラム",
+    "columns_title": "デッキのカラム",
+    "col_notifications": "alerts",
+    "move_up": "上へ移動",
+    "move_down": "下へ移動",
+    "drag_to_reorder": "ドラッグで並べ替え",
+    "live_toggle": "リアルタイム更新の切り替え",
+    "react": "絵文字でリアクション",
+    "unboost": "ブースト解除",
+    "unfavourite": "お気に入り解除",
+    "remote_reaction_hint": "他のサーバーの絵文字",
+    "col_search": "search",
+    "col_requests": "follow requests",
+    "unbookmark": "ブックマーク解除",
+    "col_social": "social",
+    "scope_social": "ホーム + ローカル",
+    "scope_alerts": "アクティビティ",
+    "scope_requests": "フォローリクエスト",
+    "scope_search": "すべて",
+    "nav_home": "ホーム",
+    "nav_social": "ソーシャル",
+    "nav_local": "ローカル",
+    "nav_federated": "連合",
+    "nav_alerts": "通知",
+    "nav_requests": "リクエスト",
+    "section_timelines": "タイムライン"
+  },
+  "airport": {
+    "pageTitle": "{name} 空港 — このサーバーのライブマップ",
+    "title": "{name} 空港",
+    "subtitle": "このサーバーの直近24時間を、実際に動く空港として描きました。すべての経路は実際の配線と一致し、数字はすべて本物です。",
+    "asOf": "{time} 時点",
+    "status": {
+      "live": "ライブ",
+      "lastKnown": "直近の値",
+      "connecting": "接続中"
+    },
+    "sceneLabel": "サーバーパイプラインを表すライブ空港シミュレーション",
+    "cards": {
+      "departures": "出発旅客",
+      "arrivals": "到着旅客",
+      "transfers": "乗り継ぎ",
+      "cargoOut": "貨物(出発)",
+      "cargoIn": "貨物(到着)",
+      "passports": "パスポート発行",
+      "items": "{count}個"
+    },
+    "scene": {
+      "sky": "連合の空",
+      "runwayDep": "出発滑走路",
+      "runwayDepSub": "(連合送信)",
+      "runwayArr": "到着滑走路",
+      "runwayArrSub": "(inbox)",
+      "tower": "管制塔",
+      "towerSub": "(運用 · キュー)",
+      "towerLine": "発着 {movements}回 · DLQ {dlq}",
+      "dlqClear": "なし",
+      "cargo": "貨物ターミナル (R2)",
+      "cargoSub": "ベリー貨物 · メディア",
+      "city": "市内",
+      "landsideDep": "出発 · ランドサイド",
+      "landsideArr": "到着 · ランドサイド",
+      "cloudflare": "Cloudflareゲート",
+      "checkin": "チェックイン",
+      "security": "保安検査",
+      "passport": "パスポートコントロール",
+      "boarding": "搭乗 ↑",
+      "arrivalsDown": "↓ 到着",
+      "announce": "アナウンス",
+      "announceSub": "(ストリーミング)",
+      "today": "本日",
+      "exit": "出口",
+      "baggage": "手荷物受取",
+      "immigration": "入国審査",
+      "immigrationSub": "(署名)",
+      "dlqHolding": "DLQ待機エプロン",
+      "gateA1": "A1 · 出発",
+      "gateA2": "A2 · 到着"
+    },
+    "info": {
+      "default": {
+        "title": "{name} 空港",
+        "body": "この地図のすべての施設は、このサーバーの連合パイプラインの実際の構成要素です。カーソルを合わせると、どの部分かが分かります。",
+        "stat": "24時間 · ライブ"
+      },
+      "cloudflare": {
+        "title": "Cloudflareゲート",
+        "body": "エッジです。連合宇宙とブラウザから来るすべてのHTTPリクエストは、Cloudflareのネットワークを通ってまずここに入ります。",
+        "stat": "エッジ"
+      },
+      "checkin": {
+        "title": "チェックイン",
+        "body": "レートリミッターです。1つのクライアントがAPIを叩ける頻度を制限し、バーストがサーバーを押し潰さないようにします。",
+        "stat": "レート制限"
+      },
+      "security": {
+        "title": "保安検査",
+        "body": "ボット防御(Turnstile)です。AIクローラーやスパムボットはここで追い返され、本物の人はそのまま通過します。",
+        "stat": "ボット対策"
+      },
+      "passport": {
+        "title": "パスポートコントロール",
+        "body": "認証です。ログインセッションやアプリのOAuthトークンをここで確認してから、サーバーへの書き込みが可能になります。",
+        "stat": "認証"
+      },
+      "gate": {
+        "title": "駐機スタンド",
+        "body": "連合キューです。公開されたばかりの投稿が配送ジョブ(QUEUE_FEDERATION)としてここで待ち、キューコンシューマーが運び出します。",
+        "stat": "キュー"
+      },
+      "immigration": {
+        "title": "入国審査",
+        "body": "受信側のHTTP署名検証です。inboxに届いたすべてのアクティビティが、本当にそのサーバーから来たのかをここで確認します。",
+        "stat": "{arrivals}人 通過"
+      },
+      "baggage": {
+        "title": "手荷物受取",
+        "body": "リモートメディアです。連合投稿と一緒に運ばれてきた添付ファイルを、メディアプロキシが取得して表示します。",
+        "stat": "添付ファイル"
+      },
+      "exit": {
+        "title": "出口",
+        "body": "タイムラインです。検証を終えたリモート投稿がパイプラインを抜けて、ローカルフィードに現れる地点です。",
+        "stat": "タイムライン"
+      },
+      "cargo": {
+        "title": "貨物ターミナル (R2)",
+        "body": "オブジェクトストレージ(R2 MEDIA_BUCKET)です。アップロードされた画像・動画・音声はすべてここに保存されます — メディアは投稿本文と一緒には移動しません。",
+        "stat": "着 {cargoIn} · 発 {cargoOut}"
+      },
+      "announce": {
+        "title": "アナウンス (ストリーミング)",
+        "body": "ストリーミングサービス(Durable Object)です。接続中のすべてのクライアントへ、WebSocketで新しい投稿や通知をリアルタイムに押し出します。",
+        "stat": "本日 {announceN}件"
+      },
+      "tower": {
+        "title": "管制塔 (運用)",
+        "body": "キューコンシューマーのワーカーです。連合キューを順番に処理し、アクティビティに署名して配送し、サーバーごとの成否を記録します。",
+        "stat": "発着 {movements}回"
+      },
+      "dlq": {
+        "title": "DLQ待機エプロン",
+        "body": "デッドレターの保管所(federation_dlq_parked)です。リトライを使い果たした配送がここに駐機し、管理者の再送や整理を待ちます — 赤は何かが着陸できていない印です。",
+        "statEmpty": "空 · 良好",
+        "statWaiting": "{dlq}件 待機"
+      },
+      "deprwy": {
+        "title": "出発滑走路 09L",
+        "body": "連合送信です。キューコンシューマーがActivityPubアクティビティに署名し、相手サーバーのinboxへ直接POSTします — Cloudflareへ戻らず、まっすぐ外へ出ます。",
+        "stat": "{departures}便 出発"
+      },
+      "arrrwy": {
+        "title": "到着滑走路 09R",
+        "body": "連合受信 — このサーバーの共有inboxです。他のサーバーが送ったアクティビティがここに着陸します。",
+        "stat": "{arrivals}便 着陸"
+      },
+      "beaconBody": "このサーバーと連合している別のFediverseサーバーです。ビーコンの大きさは直近24時間にそこから届いた投稿の量です。",
+      "beaconStat": "{count}件 到着"
+    },
+    "ops": {
+      "title": "運行状況",
+      "gate": {
+        "title": "正面ゲート・ターミナル",
+        "status": "営業中",
+        "desc": "あなたと{title}をつなぐ正門です。このページもこの門を通ってきました。新しい投稿(出発旅客)、直近1日で{departures}人。"
+      },
+      "federation": {
+        "title": "国際線(連合)",
+        "statusOk": "運航中",
+        "statusDelayed": "一部遅延",
+        "desc": "直近1日で{arrivals}人が{destinations}か所の空港から到着しました。新しい投稿はここで連合の空へ出発手続きをします。",
+        "delayedNote": "次の路線で配送失敗が積み上がっています:",
+        "failures": "配送失敗 {count}回"
+      },
+      "transfer": {
+        "title": "乗り継ぎ通路",
+        "status": "営業中",
+        "desc": "直近1日で{transfers}人が到着後、乗り継ぎ通路を通って再び出発便に乗りました。ブーストがこの通路を使います。"
+      },
+      "cargo": {
+        "title": "貨物ターミナル(R2)",
+        "status": "稼働中",
+        "desc": "直近1日で預け荷物{out}個({bytes})が倉庫に入り、到着荷物{in}個が受取所に出ました。"
+      },
+      "passport": {
+        "title": "パスポートデスク",
+        "status": "営業中",
+        "desc": "直近1日で{count}人が新しいパスポートを受け取りました。新しいアカウントが新しいパスポートです。"
+      },
+      "tower": {
+        "title": "管制塔の放送",
+        "status": "放送中",
+        "desc": "新しい投稿が生まれると、管制塔が接続中の画面へすぐに案内放送をします。直近1日の放送は{total}件でした。"
+      },
+      "dlq": {
+        "title": "欠航貨物置き場",
+        "statusEmpty": "空",
+        "statusParked": "欠航{count}件",
+        "emptyDesc": "置き場はがらんとしています。良い知らせです。",
+        "parkedDesc": "{count}件の荷物がどうしても届けられず置き場に停まっています。管理画面から再送や整理ができます。"
+      }
+    },
+    "story": {
+      "title": "空港はこう動く",
+      "p1": {
+        "lead": "すべての施設が実在の構成要素です。",
+        "body": "この地図はサーバーの実際のパイプラインを空港として描いたものです。実際の配線にない施設は描かず、実在する経路はすべて描いています。飛行機は演出ですが、数字は違います。"
+      },
+      "p2": {
+        "lead": "ランドサイドはリクエストのパイプラインです。",
+        "body": "すべてのリクエストはCloudflareエッジから入り、レートリミッター(チェックイン)、ボット防御(保安検査)、認証(パスポートコントロール)を順に通らないと何もできません — 実際のミドルウェアと順序まで同じです。"
+      },
+      "p3": {
+        "lead": "貨物はメディアです。",
+        "body": "画像や動画は投稿の中に載って移動しません。R2オブジェクトストレージ(貨物ターミナル)に住み、別々に動きます — 出るときはアップロード、入るときはメディアプロキシ経由です。"
+      },
+      "p4": {
+        "lead": "到着は連合受信です。",
+        "body": "他のサーバーの投稿は共有inbox(09R)に着陸し、HTTP署名検証(入国審査)を通過してから、ローカルタイムライン(出口)に入ります。"
+      },
+      "p5": {
+        "lead": "アナウンスはストリーミングサービスです。",
+        "body": "1つのDurable Objectが開いているすべてのクライアントとWebSocketでつながり、新しい投稿や通知を発生した瞬間に押し出します。"
+      },
+      "p6": {
+        "lead": "管制塔とDLQ。",
+        "body": "管制塔はキューコンシューマーです。連合キューを順に処理し、サーバーごとの配送成否を記録します。リトライを使い果たした配送はデッドレターテーブル(DLQ待機エプロン)に駐機して管理者の再送を待ちます。数字は約1分ごとに更新され、アカウント・宛先・本文は含まれません。"
+      }
     }
   }
 }
