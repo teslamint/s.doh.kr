@@ -43,6 +43,8 @@ env:
 jobs:
   check-and-sync:
     runs-on: ubuntu-latest
+    # SYNC_TOKEN lives in the production environment, so this job needs it too
+    environment: production
     permissions:
       contents: write
       issues: write
