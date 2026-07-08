@@ -370,7 +370,7 @@ cat > "$MAIN_DIR/wrangler.jsonc" << WRANGLER_EOF
 	"migrations": [
 		{
 			"tag": "v1",
-			"new_classes": ["StreamingDO"]
+			"new_sqlite_classes": ["StreamingDO"]
 		}
 	],
 

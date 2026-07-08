@@ -156,6 +156,12 @@ else
 fi
 
 if [[ -z "$DB_ID" ]]; then
+  # "already exists" errors don't include the ID — look up the existing database
+  DB_ID=$(wrangler d1 info "$DB_NAME" --json 2>/dev/null | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+  [[ -n "$DB_ID" ]] && success "Found existing D1 database: $DB_ID"
+fi
+
+if [[ -z "$DB_ID" ]]; then
   error "Could not determine D1 database ID. Check output:"
   echo "$DB_OUTPUT"
   exit 1
@@ -174,16 +180,29 @@ fi
 # --- KV Namespaces ---
 create_kv_namespace() {
   local TITLE="$1"
-  info "Creating KV namespace: $TITLE"
+  # Log to stderr: stdout is captured by the caller as the namespace ID
+  info "Creating KV namespace: $TITLE" >&2
   local KV_OUTPUT
   KV_OUTPUT=$(wrangler kv namespace create "$TITLE" 2>&1 || true)
   if echo "$KV_OUTPUT" | grep -qi "already exists"; then
-    warn "KV namespace '$TITLE' may already exist."
+    warn "KV namespace '$TITLE' may already exist." >&2
   fi
   local KV_ID
   KV_ID=$(echo "$KV_OUTPUT" | grep -oE '[0-9a-f]{32}' | head -1)
   if [[ -z "$KV_ID" ]]; then
     KV_ID=$(echo "$KV_OUTPUT" | grep -oE '"id":\s*"[^"]*"' | head -1 | grep -oE '[0-9a-f]{32}')
+  fi
+  if [[ -z "$KV_ID" ]]; then
+    # "already exists" errors don't include the ID — look up the existing namespace
+    KV_ID=$(wrangler kv namespace list 2>/dev/null | TITLE="$TITLE" node -e "
+let s = '';
+process.stdin.on('data', (d) => s += d).on('end', () => {
+  try {
+    const ns = JSON.parse(s).find((n) => n.title === process.env.TITLE);
+    process.stdout.write(ns ? ns.id : '');
+  } catch (e) {}
+});
+")
   fi
   echo "$KV_ID"
 }
