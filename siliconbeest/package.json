@@ -30,7 +30,7 @@
 		"@sentry/vue": "^10.45.0",
 		"@vueuse/core": "^14.2.1",
 		"bcryptjs": "^3.0.3",
-		"hono": "^4.6.20",
+		"hono": "^4.12.19",
 		"marked": "^17.0.5",
 		"neverthrow": "^8.2.0",
 		"pinia": "^3.0.4",
