@@ -74,7 +74,23 @@ read_wrangler_json() {
   node -e "
 const fs = require('fs');
 const content = fs.readFileSync('$FILE', 'utf8');
-const cleaned = content.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+// Strip JSONC comments without touching string contents (URLs contain '//')
+let cleaned = '', inStr = false, inLine = false, inBlock = false;
+for (let i = 0; i < content.length; i++) {
+  const c = content[i], n = content[i + 1];
+  if (inLine) { if (c === '\n') { inLine = false; cleaned += c; } continue; }
+  if (inBlock) { if (c === '*' && n === '/') { inBlock = false; i++; } continue; }
+  if (inStr) {
+    cleaned += c;
+    if (c === '\\\\') { cleaned += n; i++; }
+    else if (c === '\"') { inStr = false; }
+    continue;
+  }
+  if (c === '\"') { inStr = true; cleaned += c; continue; }
+  if (c === '/' && n === '/') { inLine = true; continue; }
+  if (c === '/' && n === '*') { inBlock = true; i++; continue; }
+  cleaned += c;
+}
 try {
   const config = JSON.parse(cleaned);
   const result = $EXPR;

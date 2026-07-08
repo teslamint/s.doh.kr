@@ -73,7 +73,10 @@ info "Instance domain: $INSTANCE_DOMAIN"
 # ---------------------------------------------------------------------------
 header "Generating Admin User Data"
 
-SEED_DATA=$(node -e "
+# Pass user input via environment — interpolating it into the JS source breaks
+# on quotes/backslashes (and is an injection risk)
+SEED_DATA=$(INSTANCE_DOMAIN="$INSTANCE_DOMAIN" ADMIN_USERNAME="$ADMIN_USERNAME" \
+  ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" node -e "
 const crypto = require('crypto');
 
 // Simple ULID-like ID generator (timestamp + random)
@@ -100,10 +103,10 @@ async function main() {
   const userId    = generateId();
   const keyId     = generateId();
   const now       = new Date().toISOString();
-  const domain    = '$INSTANCE_DOMAIN';
-  const username  = '$ADMIN_USERNAME';
-  const email     = '$ADMIN_EMAIL';
-  const password  = '$ADMIN_PASSWORD';
+  const domain    = process.env.INSTANCE_DOMAIN;
+  const username  = process.env.ADMIN_USERNAME;
+  const email     = process.env.ADMIN_EMAIL;
+  const password  = process.env.ADMIN_PASSWORD;
 
   const actorUri  = 'https://' + domain + '/users/' + username;
   const actorUrl  = 'https://' + domain + '/@' + username;
@@ -118,11 +121,12 @@ async function main() {
     privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
   });
 
-  // Ed25519 keypair
-  const ed = crypto.generateKeyPairSync('ed25519', {
-    publicKeyEncoding:  { type: 'spki',  format: 'pem' },
-    privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-  });
+  // Ed25519 keypair — the app expects base64url, NOT PEM: raw 32-byte public
+  // key and PKCS8 DER private key (see importEd25519PublicKey/PrivateKey)
+  const ed = crypto.generateKeyPairSync('ed25519');
+  const b64url = (buf) => buf.toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+\$/, '');
+  const edPublicKey  = b64url(ed.publicKey.export({ type: 'spki', format: 'der' }).subarray(-32));
+  const edPrivateKey = b64url(ed.privateKey.export({ type: 'pkcs8', format: 'der' }));
 
   const keyIdUri = actorUri + '#main-key';
 
@@ -132,8 +136,8 @@ async function main() {
     passwordHash,
     actorUri, actorUrl,
     publicKey, privateKey,
-    ed25519PublicKey: ed.publicKey,
-    ed25519PrivateKey: ed.privateKey,
+    ed25519PublicKey: edPublicKey,
+    ed25519PrivateKey: edPrivateKey,
     keyIdUri
   };
 

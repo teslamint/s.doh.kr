@@ -30,10 +30,10 @@
 
 	// Environment Variables (secrets set via `wrangler secret put`)
 	"vars": {
-		"INSTANCE_DOMAIN": "social.example.com",
-		"INSTANCE_TITLE": "My SiliconBeest Instance",
-		"REPOSITORY_URL": "https://github.com/SJang1/siliconbeest",
-		"REGISTRATION_MODE": "open",
+		"INSTANCE_DOMAIN": "s.doh.kr",
+		"INSTANCE_TITLE": "SiliconBeest",
+		"REPOSITORY_URL": "https://github.com/teslamint/s.doh.kr",
+		"REGISTRATION_MODE": "approval",
 		"SKIP_SIGNATURE_VERIFICATION": true
 	},
 
@@ -42,7 +42,7 @@
 		{
 			"binding": "DB",
 			"database_name": "siliconbeest-db",
-			"database_id": "YOUR_D1_DATABASE_ID"
+			"database_id": "304f8b75-d327-4dca-a6d5-17c5d1c66885"
 		}
 	],
 
@@ -58,15 +58,15 @@
 	"kv_namespaces": [
 		{
 			"binding": "CACHE",
-			"id": "YOUR_KV_CACHE_ID"
+			"id": "2e9279ee472849799c4982b6187c8447"
 		},
 		{
 			"binding": "SESSIONS",
-			"id": "YOUR_KV_SESSIONS_ID"
+			"id": "7c4ec6f8dbec4985a2b05f154bc38114"
 		},
 		{
 			"binding": "FEDIFY_KV",
-			"id": "YOUR_KV_FEDIFY_ID"
+			"id": "caa6f27a5ca243bba3a79f93f46f0114"
 		}
 	],
 
@@ -100,7 +100,7 @@
 	"migrations": [
 		{
 			"tag": "v1",
-			"new_classes": ["StreamingDO"]
+			"new_sqlite_classes": ["StreamingDO"]
 		}
 	],
 
@@ -108,7 +108,7 @@
 	"routes": [
 		{
 			"custom_domain": true,
-			"pattern": "social.example.com"
+			"pattern": "s.doh.kr"
 		}
 	]
 }
