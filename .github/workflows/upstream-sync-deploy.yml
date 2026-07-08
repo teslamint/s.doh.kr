@@ -8,6 +8,8 @@
 # Required GitHub Secrets:
 #   CLOUDFLARE_API_TOKEN   — CF API token with Workers/D1/R2/KV/Queues permissions
 #   CLOUDFLARE_ACCOUNT_ID  — Your Cloudflare account ID
+#   SYNC_TOKEN             — Fine-grained PAT (Contents + Workflows: read/write)
+#                            used to push upstream merges that modify workflows
 #
 # Required GitHub Repository Variables:
 #   PROJECT_PREFIX     — Resource name prefix (e.g. "siliconbeest")
@@ -52,7 +54,9 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # SYNC_TOKEN: fine-grained PAT with Contents + Workflows write, required
+          # to push merges that touch .github/workflows (GITHUB_TOKEN is rejected)
+          token: ${{ secrets.SYNC_TOKEN || github.token }}
 
       - name: Add upstream remote
         run: |
