@@ -24,6 +24,7 @@
 #
 # Optional GitHub Repository Variables:
 #   AUTO_UPDATE_UPSTREAM_DEPLOY — "true" (default) or "false" (sync only, skip deploy after upstream update)
+#   UPSTREAM_REPO_URL  — Upstream template repo to sync from (default: https://github.com/SJang1/siliconbeest.git)
 # =============================================================================
 
 name: Sync Upstream & Deploy
@@ -39,7 +40,9 @@ on:
         default: false
 
 env:
-  UPSTREAM_REPO: ${{ vars.REPOSITORY_URL || 'https://github.com/SJang1/siliconbeest.git' }}
+  # REPOSITORY_URL is this instance's own public source URL, not the upstream template;
+  # using it here made the job fetch its own repo and never find upstream tags
+  UPSTREAM_REPO: ${{ vars.UPSTREAM_REPO_URL || 'https://github.com/SJang1/siliconbeest.git' }}
 
 jobs:
   check-and-sync:
