@@ -4,12 +4,13 @@
  * Handles incoming Delete activities. If the object is a status URI
  * (or Tombstone), soft-deletes the status. If the actor URI matches
  * the object, treats it as an actor deletion (account suspension).
- * Also removes related home_timeline_entries.
  */
 
 import type { APActivity, APObject } from '../../types/activitypub';
 import { BaseProcessor } from './BaseProcessor';
 import { env } from 'cloudflare:workers';
+import { canProcessIncomingOwnedDelete } from '../../services/permissions';
+import { areActivityPubUrisEquivalent } from '../../../../../packages/shared/permissions';
 
 class DeleteProcessor extends BaseProcessor {
 	async process(activity: APActivity): Promise<void> {
@@ -49,7 +50,10 @@ class DeleteProcessor extends BaseProcessor {
 		}
 
 		if (revokedAuthorization) {
-			if (revokedAuthorization.attributed_to_account_id !== actorAccount.id) {
+			if (!await canProcessIncomingOwnedDelete(
+				actorAccount.id,
+				revokedAuthorization.attributed_to_account_id,
+			)) {
 				console.warn('[delete] Actor does not own the quote authorization being deleted');
 				return;
 			}
@@ -71,36 +75,45 @@ class DeleteProcessor extends BaseProcessor {
 		}
 
 		const revokedRemoteAuthorization = await env.DB.prepare(
-			`SELECT id FROM statuses
-			 WHERE quote_authorization_uri = ?1 AND deleted_at IS NULL`,
-		).bind(objectUri).first<{ id: string }>();
+			`SELECT s.id, qs.account_id AS authorization_owner_account_id
+			 FROM statuses s
+			 JOIN statuses qs ON qs.id = s.quote_id
+			 WHERE s.quote_authorization_uri = ?1 AND s.deleted_at IS NULL
+			 LIMIT 1`,
+		).bind(objectUri).first<{
+			id: string;
+			authorization_owner_account_id: string;
+		}>();
 		if (revokedRemoteAuthorization) {
+			if (!await canProcessIncomingOwnedDelete(
+				actorAccount.id,
+				revokedRemoteAuthorization.authorization_owner_account_id,
+			)) {
+				console.warn('[delete] Actor does not own the remote quote authorization being deleted');
+				return;
+			}
 			await env.DB.prepare(
 				`UPDATE statuses
 				 SET quote_id = NULL,
 				     quote_authorization_uri = NULL,
 				     quote_approval_status = 'revoked',
 				     updated_at = ?1
-				 WHERE quote_authorization_uri = ?2`,
-			).bind(now, objectUri).run();
+				 WHERE quote_authorization_uri = ?2
+				   AND quote_id IN (SELECT id FROM statuses WHERE account_id = ?3)`,
+			).bind(now, objectUri, actorAccount.id).run();
 			return;
 		}
 
 		// Check if this is an actor self-deletion (actor URI == object URI)
-		if (objectUri === actorAccount.uri) {
+		if (areActivityPubUrisEquivalent(objectUri, actorAccount.uri)) {
+			if (!await canProcessIncomingOwnedDelete(actorAccount.id, actorAccount.id)) {
+				return;
+			}
 			// Suspend the account
 			await this.accountRepo.update(actorAccount.id, { suspended_at: now });
 
 			// Soft-delete all their statuses
 			await this.statusRepo.softDeleteByAccount(actorAccount.id);
-
-			// Remove from home timelines
-			await env.DB.prepare(
-				`DELETE FROM home_timeline_entries
-				 WHERE status_id IN (SELECT id FROM statuses WHERE account_id = ?1)`,
-			)
-				.bind(actorAccount.id)
-				.run();
 
 			console.log(`[delete] Suspended account: ${activity.actor}`);
 			return;
@@ -122,7 +135,7 @@ class DeleteProcessor extends BaseProcessor {
 		if (!status) return;
 
 		// Verify the actor owns the status
-		if (status.account_id !== actorAccount.id) {
+		if (!await canProcessIncomingOwnedDelete(actorAccount.id, status.account_id)) {
 			console.warn('[delete] Actor does not own the status being deleted');
 			return;
 		}
@@ -140,12 +153,6 @@ class DeleteProcessor extends BaseProcessor {
 			await this.statusRepo.decrementCount(status.reblog_of_id, 'reblogs_count');
 		}
 
-		// Remove from home timelines
-		await env.DB.prepare(
-			`DELETE FROM home_timeline_entries WHERE status_id = ?1`,
-		)
-			.bind(status.id)
-			.run();
 	}
 }
 

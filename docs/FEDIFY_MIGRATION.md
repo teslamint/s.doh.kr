@@ -245,7 +245,7 @@ Fedify 내부에서 WorkersMessageQueue를 통해 QUEUE_FEDERATION으로 메시�
 | `statuses/reactions.ts` | `sendToRecipient` + Fedify `Like` + Misskey extension 주입 |
 | `accounts/follow.ts` / `unfollow.ts` / `block.ts` / `unblock.ts` | `sendToRecipient` + Fedify vocab |
 | `accounts/migration.ts` | `sendToFollowers` + Fedify `Move` + `lookupWebFinger`/`lookupObject` |
-| `accounts/lookup.ts` | `lookupWebFinger`/`lookupObject` 사용 |
+| `accounts/lookup.ts` | 로컬 DB에 알려진 acct만 정확 조회; 원격 resolve는 인증된 v2 search로 분리 |
 | `accounts/aliases.ts` | `lookupWebFinger` 사용 |
 | `followRequests.ts` | `sendToRecipient` + Fedify `Accept`/`Reject` vocab |
 | `reports.ts` | `ctx.sendActivity()` 직접 호출 + Fedify `Flag` vocab |
@@ -352,7 +352,7 @@ Worker의 actor dispatcher와 동일한 로직이지만 슬림 버전:
 레거시 메시지 타입별 핸들러 모두 유지:
 - `handleDeliverActivity` — 직접 HTTP 배달 (릴레이 등 인스턴스 액터 발신용)
 - `handleDeliverActivityFanout` — 팔로워 일괄 배달 (레거시)
-- `handleTimelineFanout` — 홈 타임라인 팬아웃
+- `handleTimelineFanout` — 팔로워 및 공개 피드 실시간 스트리밍
 - `handleCreateNotification` — 알림 생성
 - `handleProcessMedia` — 미디어 처리
 - `handleFetchRemoteAccount` / `handleFetchRemoteStatus` — 원격 데이터 fetch
@@ -465,7 +465,7 @@ const actorObject = await ctx.lookupObject(actorUri);
 | `statuses/create.ts` | `lookupWebFinger` | 멘션된 원격 사용자 resolve |
 | `accounts/migration.ts` | `lookupWebFinger` + `lookupObject` | 마이그레이션 대상 계정 확인 |
 | `accounts/aliases.ts` | `lookupWebFinger` | 별칭 등록 시 원격 계정 확인 |
-| `accounts/lookup.ts` | `lookupWebFinger` + `lookupObject` | 원격 계정 조회 |
+| `accounts/lookup.ts` | 사용 안 함 | 캐시된 acct만 조회하고 네트워크 resolve는 수행하지 않음 |
 | `inboxProcessors/move.ts` | `lookupObject` | 마이그레이션 수신 시 새 계정 확인 |
 
 ### 교체된 파일

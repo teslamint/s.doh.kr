@@ -1,4 +1,4 @@
-import { SELF } from 'cloudflare:test';
+import { env, SELF } from 'cloudflare:test';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { applyMigration, createTestUser, authHeaders } from './helpers';
 
@@ -7,10 +7,35 @@ const DOMAIN = 'test.siliconbeest.local';
 
 describe('ActivityPub Endpoints', () => {
   let user: { accountId: string; userId: string; token: string };
+  let suspendedStatusId: string;
 
   beforeAll(async () => {
     await applyMigration();
     user = await createTestUser('apuser');
+    const disabled = await createTestUser('apdisabled');
+    const pending = await createTestUser('appending');
+    const memorial = await createTestUser('apmemorial');
+    const suspended = await createTestUser('apsuspended');
+    await env.DB.prepare('UPDATE users SET disabled = 1 WHERE id = ?1')
+      .bind(disabled.userId).run();
+    await env.DB.prepare('UPDATE users SET approved = 0 WHERE id = ?1')
+      .bind(pending.userId).run();
+    await env.DB.prepare('UPDATE accounts SET memorial = 1 WHERE id = ?1')
+      .bind(memorial.accountId).run();
+
+    const suspendedStatus = await SELF.fetch(`${BASE}/api/v1/statuses`, {
+      method: 'POST',
+      headers: authHeaders(suspended.token),
+      body: JSON.stringify({ status: 'must disappear after suspension', visibility: 'public' }),
+    });
+    expect(suspendedStatus.status).toBe(200);
+    suspendedStatusId = (await suspendedStatus.json<{ id: string }>()).id;
+    await env.DB.batch([
+      env.DB.prepare('UPDATE statuses SET pinned = 1 WHERE id = ?1')
+        .bind(suspendedStatusId),
+      env.DB.prepare('UPDATE accounts SET suspended_at = ?1 WHERE id = ?2')
+        .bind(new Date().toISOString(), suspended.accountId),
+    ]);
 
     // Create a public status so the outbox has content
     await SELF.fetch(`${BASE}/api/v1/statuses`, {
@@ -60,6 +85,42 @@ describe('ActivityPub Endpoints', () => {
       });
       expect(res.status).toBe(404);
     });
+
+    it.each(['apdisabled', 'appending', 'apmemorial'])(
+      'does not expose inactive actor %s through Actor or WebFinger',
+      async (username) => {
+        const actor = await SELF.fetch(`${BASE}/users/${username}`, {
+          headers: { Accept: 'application/activity+json' },
+        });
+        expect(actor.status).toBe(404);
+
+        const webfinger = await SELF.fetch(
+          `${BASE}/.well-known/webfinger?resource=acct:${username}@${DOMAIN}`,
+        );
+        expect(webfinger.status).toBe(404);
+      },
+    );
+
+    it('publishes assertionMethod keys under fedify keyId naming', async () => {
+      // Outbound FEP-8b32 integrity proofs reference `#multikey-2`
+      // (fedify's positional Multikey naming); the actor document must
+      // publish that exact id or remote servers cannot verify our proofs.
+      const res = await SELF.fetch(`${BASE}/users/apuser`, {
+        headers: { Accept: 'application/activity+json' },
+      });
+      const body = await res.json<Record<string, any>>();
+
+      const methods = Array.isArray(body.assertionMethod)
+        ? body.assertionMethod
+        : [body.assertionMethod];
+      const ids = methods.filter(Boolean).map((m: any) => (typeof m === 'string' ? m : m.id));
+      expect(ids).toContain(`https://${DOMAIN}/users/apuser#multikey-2`);
+      for (const m of methods.filter((m: any) => m && typeof m !== 'string')) {
+        expect(m.type).toBe('Multikey');
+        expect(m.controller).toBe(`https://${DOMAIN}/users/apuser`);
+        expect(m.publicKeyMultibase).toBeDefined();
+      }
+    });
   });
 
   // -------------------------------------------------------------------
@@ -90,6 +151,35 @@ describe('ActivityPub Endpoints', () => {
       expect(body.type).toBe('OrderedCollectionPage');
       expect(body.orderedItems).toBeDefined();
       expect(Array.isArray(body.orderedItems)).toBe(true);
+    });
+
+    it('fails closed for every child resource of a suspended local actor', async () => {
+      const paths = [
+        `/users/apsuspended/statuses/${suspendedStatusId}`,
+        `/users/apsuspended/statuses/${suspendedStatusId}/activity`,
+        `/users/apsuspended/statuses/${suspendedStatusId}/replies`,
+        `/users/apsuspended/statuses/${suspendedStatusId}/shares`,
+        `/users/apsuspended/statuses/${suspendedStatusId}/likes`,
+        '/users/apsuspended/outbox',
+        '/users/apsuspended/collections/featured',
+        '/users/apsuspended/collections/tags',
+        '/users/apsuspended/followers',
+        '/users/apsuspended/following',
+      ];
+
+      for (const path of paths) {
+        const res = await SELF.fetch(`${BASE}${path}`, {
+          headers: { Accept: 'application/activity+json, application/ld+json' },
+        });
+        expect([401, 404]).toContain(res.status);
+      }
+    });
+
+    it('does not expose the unadvertised liked collection', async () => {
+      const res = await SELF.fetch(`${BASE}/users/apuser/liked`, {
+        headers: { Accept: 'application/activity+json' },
+      });
+      expect(res.status).toBe(404);
     });
   });
 

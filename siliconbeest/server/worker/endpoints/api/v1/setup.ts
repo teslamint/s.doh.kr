@@ -7,6 +7,7 @@ import { registerUser, getOrCreateInternalApp, createAccessToken, updateSignInTr
 import { createDefaultImages } from '../../../utils/defaultImages';
 import { sanitizeLocale } from '../../../utils/locales';
 import { setAuthTokenCookie } from '../../../utils/authCookie';
+import { getInternalSessionOAuthScopes } from '../../../../../../packages/shared/permissions';
 
 const SETUP_LOCK_KEY = 'setup_admin_seeded';
 
@@ -18,6 +19,7 @@ type SetupCreateBody = {
   email?: string;
   password?: string;
   locale?: string;
+  setup_secret?: string;
 };
 
 async function readSetupCreateBody(c: SetupContext): Promise<SetupCreateBody> {
@@ -33,12 +35,28 @@ async function readSetupCreateBody(c: SetupContext): Promise<SetupCreateBody> {
     email: typeof form.email === 'string' ? form.email : undefined,
     password: typeof form.password === 'string' ? form.password : undefined,
     locale: typeof form.locale === 'string' ? form.locale : undefined,
+    setup_secret: typeof form.setup_secret === 'string' ? form.setup_secret : undefined,
   };
 }
 
 async function getUserCount(): Promise<number> {
   const row = await env.DB.prepare('SELECT COUNT(*) AS count FROM users').first<{ count: number }>();
   return Number(row?.count ?? 0);
+}
+
+function getSetupSecret(): string {
+  return ((env as unknown as { SETUP_SECRET?: string }).SETUP_SECRET ?? '').trim();
+}
+
+async function verifySetupSecret(providedSecret: string | undefined): Promise<boolean> {
+  const setupSecret = getSetupSecret();
+  if (!setupSecret || !providedSecret) return false;
+
+  const encoder = new TextEncoder();
+  const expected = await crypto.subtle.digest('SHA-256', encoder.encode(setupSecret));
+  const actual = await crypto.subtle.digest('SHA-256', encoder.encode(providedSecret));
+
+  return crypto.subtle.timingSafeEqual(expected, actual);
 }
 
 app.get('/', async (c) => {
@@ -51,14 +69,23 @@ app.get('/', async (c) => {
 
 app.post('/', async (c) => {
   const body = await readSetupCreateBody(c);
-
-  if (!body.username || !body.email || !body.password) {
-    throw new AppError(422, 'Validation failed', 'Username, email, and password are required');
-  }
-
   const beforeCount = await getUserCount();
   if (beforeCount !== 0) {
     throw new AppError(403, 'Initial setup is no longer available');
+  }
+
+  const setupSecret = (c.req.header('X-Setup-Secret') ?? body.setup_secret)?.trim();
+
+  if (!getSetupSecret()) {
+    throw new AppError(503, 'Initial setup is not configured');
+  }
+
+  if (!await verifySetupSecret(setupSecret)) {
+    throw new AppError(403, 'Invalid setup secret');
+  }
+
+  if (!body.username || !body.email || !body.password) {
+    throw new AppError(422, 'Validation failed', 'Username, email, and password are required');
   }
 
   const now = new Date().toISOString();
@@ -105,10 +132,14 @@ app.post('/', async (c) => {
              approved = 1,
              confirmed_at = ?1,
              confirmation_token = NULL,
+             registration_state = 'active',
              locale = ?2,
              updated_at = ?1
          WHERE id = ?3`,
       ).bind(now, locale, user.id),
+      env.DB.prepare(
+        'UPDATE accounts SET discoverable = 1, updated_at = ?1 WHERE id = ?2',
+      ).bind(now, account.id),
       env.DB.prepare(
         'UPDATE settings SET value = ?1, updated_at = ?2 WHERE key = ?3',
       ).bind(user.id, now, SETUP_LOCK_KEY),
@@ -117,11 +148,13 @@ app.post('/', async (c) => {
     const appRecord = await getOrCreateInternalApp();
     const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
     const userAgent = c.req.header('User-Agent') || '';
+    const scopes = getInternalSessionOAuthScopes('admin');
     const { tokenValue, createdAt } = await createAccessToken(appRecord.id, user.id, {
       ip,
       userAgent,
       email,
       locale,
+      scopes,
     });
     await updateSignInTracking(user.id, ip);
 
@@ -130,7 +163,7 @@ app.post('/', async (c) => {
     return c.json({
       access_token: tokenValue,
       token_type: 'Bearer',
-      scope: 'read write follow push',
+      scope: scopes,
       created_at: Math.floor(new Date(createdAt).getTime() / 1000),
     });
   } catch (error) {

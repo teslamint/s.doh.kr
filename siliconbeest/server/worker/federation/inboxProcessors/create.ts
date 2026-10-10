@@ -1,7 +1,7 @@
 /**
- * Inbox Processor: Create(Note | Question)
+ * Inbox Processor: Create(Article | Note | Question)
  *
- * Handles incoming Create activities containing a Note or Question object.
+ * Handles incoming Create activities containing an Article, Note, or Question object.
  * Inserts the remote status, resolves the author account, processes
  * mentions, and fans out to local followers' timelines.
  * For Question objects (polls), also extracts poll options and metadata.
@@ -16,10 +16,26 @@ import { BaseProcessor } from './BaseProcessor';
 import { getQuoteUri, verifyQuoteAuthorization } from '../helpers/quote';
 import { customEmojiTagDomain, emojiTagToCustomEmoji } from '../../../../../packages/shared/utils/customEmoji';
 import { parseQuotePolicyDetailsFromInteractionPolicy } from '../../../../../packages/shared/utils/quotePolicy';
+import { constrainQuoteVisibility } from '../../../../../packages/shared/permissions';
+import { sendStreamEvent } from '../../services/streaming';
+import {
+	canAccountInteractWithStatus,
+	canAccountOriginateFederationActivity,
+	canProcessFederatedStatusInteraction,
+	canSurfaceStatusToViewer,
+} from '../../services/permissions';
 
 interface CreateProcessorOptions {
 	fanout?: boolean;
 	notify?: boolean;
+}
+
+type StoredPollOption = { title: string; votes_count: number };
+
+function isStoredPollOption(value: unknown): value is StoredPollOption {
+	if (!value || typeof value !== 'object') return false;
+	const option = value as Record<string, unknown>;
+	return typeof option.title === 'string' && typeof option.votes_count === 'number';
 }
 
 /**
@@ -95,44 +111,44 @@ function firstUrl(value: unknown): string | null {
 }
 
 class CreateProcessor extends BaseProcessor {
-	async process(activity: APActivity, options: CreateProcessorOptions = {}): Promise<void> {
+	async process(activity: APActivity, options: CreateProcessorOptions = {}): Promise<boolean> {
 		const object = activity.object;
 		if (!object || typeof object === 'string') {
 			console.warn('[create] activity.object is missing or a bare URI');
-			return;
+			return false;
 		}
 
 		const note = object as APObject;
-		if (note.type !== 'Note' && note.type !== 'Question') {
-			console.log(`[create] Ignoring non-Note object type: ${note.type}`);
-			return;
+		if (note.type !== 'Article' && note.type !== 'Note' && note.type !== 'Question') {
+			console.log(`[create] Ignoring unsupported status object type: ${note.type}`);
+			return false;
 		}
 
 		if (!note.id) {
 			console.warn('[create] Note has no id');
-			return;
+			return false;
 		}
 
 		// Check for duplicates using repository
 		const existing = await this.statusRepo.findByUri(note.id);
-		if (existing) return;
+		if (existing) return false;
 
 		// Resolve the remote author
 		const authorAccountId = await this.resolveActor(activity.actor);
 		if (!authorAccountId) {
 			console.error('[create] Could not resolve remote author');
-			return;
+			return false;
 		}
+		if (!await canAccountOriginateFederationActivity(authorAccountId)) return false;
 
 		// Detect poll vote: Note with `name` (option text), inReplyTo, and no content
 		if (note.type === 'Note' && note.name && note.inReplyTo && !note.content) {
-			await this.processVote(note, authorAccountId);
-			return;
+			return this.processVote(note, authorAccountId);
 		}
 
 		const now = new Date().toISOString();
 		const statusId = generateUlid();
-		const visibility = resolveVisibility(note);
+		let visibility = resolveVisibility(note);
 
 		// Resolve in_reply_to if present
 		let inReplyToId: string | null = null;
@@ -146,6 +162,9 @@ class CreateProcessor extends BaseProcessor {
 				.first<{ id: string; account_id: string; conversation_id: string | null }>();
 
 			if (parentStatus) {
+				if (!await canAccountInteractWithStatus(parentStatus.id, authorAccountId)) {
+					return false;
+				}
 				inReplyToId = parentStatus.id;
 				inReplyToAccountId = parentStatus.account_id;
 				conversationId = parentStatus.conversation_id;
@@ -212,12 +231,19 @@ class CreateProcessor extends BaseProcessor {
 					interactionTargetUri: quoteUri,
 					targetAttributedTo: targetAuthor?.uri ?? '',
 				});
-				if (authorized) {
+				const constrainedVisibility = constrainQuoteVisibility(
+					visibility,
+					quotedStatus.visibility,
+				);
+				if (authorized && constrainedVisibility) {
+					visibility = constrainedVisibility;
 					quoteId = quotedStatus.id;
 					quoteAuthorizationUri = candidateAuthorization;
-					quoteApprovalStatus = selfQuote ? 'accepted' : 'accepted';
+					quoteApprovalStatus = 'accepted';
 				} else {
-					quoteApprovalStatus = candidateAuthorization ? 'invalid' : 'missing';
+					quoteApprovalStatus = !constrainedVisibility
+						? 'invalid_visibility'
+						: candidateAuthorization ? 'invalid' : 'missing';
 				}
 			}
 		}
@@ -287,7 +313,7 @@ class CreateProcessor extends BaseProcessor {
 		await this.processHashtags(tags, statusId, now);
 		await this.processEmojis(tags, activity.actor, now);
 
-		// Fan out to local followers' home timelines
+		// Stream to local followers and public feeds
 		if (options.fanout !== false) {
 			if (visibility !== 'direct') {
 				await env.QUEUE_INTERNAL.send({
@@ -296,9 +322,10 @@ class CreateProcessor extends BaseProcessor {
 					accountId: authorAccountId,
 				});
 			} else {
-				await this.fanoutDM(statusId, authorAccountId, now);
+				await this.fanoutDM(statusId, authorAccountId);
 			}
 		}
+		return true;
 	}
 
 	private async processQuestionData(
@@ -342,7 +369,7 @@ class CreateProcessor extends BaseProcessor {
 	private async processVote(
 		note: APObject,
 		voterAccountId: string,
-	): Promise<void> {
+	): Promise<boolean> {
 		const optionName = note.name as string;
 		const questionUri = note.inReplyTo as string;
 
@@ -351,17 +378,44 @@ class CreateProcessor extends BaseProcessor {
 			'SELECT id, poll_id FROM statuses WHERE uri = ?1 LIMIT 1',
 		).bind(questionUri).first<{ id: string; poll_id: string | null }>();
 
-		if (!parentStatus?.poll_id) return;
+		if (!parentStatus?.poll_id) return false;
+		if (!await canProcessFederatedStatusInteraction(
+			parentStatus.id,
+			voterAccountId,
+			this.recipientAccountId || null,
+		)) return false;
 
 		// Find the poll
 		const poll = await env.DB.prepare(
-			'SELECT id, options FROM polls WHERE id = ?1 LIMIT 1',
-		).bind(parentStatus.poll_id).first<{ id: string; options: string }>();
-		if (!poll) return;
+			'SELECT id, options, expires_at, multiple FROM polls WHERE id = ?1 LIMIT 1',
+		).bind(parentStatus.poll_id).first<{
+			id: string;
+			options: string;
+			expires_at: string | null;
+			multiple: number;
+		}>();
+		if (!poll) return false;
+		if (poll.expires_at) {
+			const expiresAt = Date.parse(poll.expires_at);
+			if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return false;
+		}
 
-		const options: Array<{ title: string; votes_count: number }> = JSON.parse(poll.options);
+		let options: StoredPollOption[];
+		try {
+			const parsed: unknown = JSON.parse(poll.options);
+			if (!Array.isArray(parsed) || !parsed.every(isStoredPollOption)) return false;
+			options = parsed;
+		} catch {
+			return false;
+		}
 		const choiceIndex = options.findIndex((o) => o.title === optionName);
-		if (choiceIndex === -1) return;
+		if (choiceIndex === -1) return false;
+		if (poll.multiple === 0) {
+			const existingVote = await env.DB.prepare(
+				'SELECT 1 FROM poll_votes WHERE poll_id = ?1 AND account_id = ?2 LIMIT 1',
+			).bind(poll.id, voterAccountId).first();
+			if (existingVote) return false;
+		}
 
 		const now = new Date().toISOString();
 
@@ -383,8 +437,10 @@ class CreateProcessor extends BaseProcessor {
 			await env.DB.prepare(
 				'UPDATE polls SET options = ?1, votes_count = ?2, voters_count = ?3 WHERE id = ?4',
 			).bind(JSON.stringify(options), newVotesCount, voterCount?.cnt ?? 0, poll.id).run();
+			return true;
 		} catch {
 			// UNIQUE constraint violation = duplicate vote, ignore
+			return false;
 		}
 	}
 
@@ -528,16 +584,10 @@ class CreateProcessor extends BaseProcessor {
 		// Notify streaming about new emojis
 		if (newEmojis.length > 0) {
 			try {
-				const doId = (env as Record<string, any>).STREAMING_DO?.idFromName('__public__');
-				const doStub = (env as Record<string, any>).STREAMING_DO?.get(doId);
-				await doStub.fetch('https://streaming/event', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						event: 'emoji_update',
-						payload: JSON.stringify(newEmojis),
-						stream: ['public', 'public:local', 'user'],
-					}),
+				await sendStreamEvent('__public__', {
+					event: 'emoji_update',
+					payload: JSON.stringify(newEmojis),
+					stream: ['public', 'public:local', 'user'],
 				});
 			} catch {
 				// Streaming failure shouldn't block inbox processing
@@ -548,7 +598,6 @@ class CreateProcessor extends BaseProcessor {
 	private async fanoutDM(
 		statusId: string,
 		authorAccountId: string,
-		now: string,
 	): Promise<void> {
 		interface LocalMentionRow { account_id: string }
 		const { results: localMentions } = await env.DB.prepare(
@@ -559,12 +608,13 @@ class CreateProcessor extends BaseProcessor {
 
 		if (!localMentions || localMentions.length === 0) return;
 
-		const stmts = localMentions.map((m) =>
-			env.DB.prepare(
-				'INSERT OR IGNORE INTO home_timeline_entries (status_id, account_id, created_at) VALUES (?1, ?2, ?3)',
-			).bind(statusId, m.account_id, now),
-		);
-		await env.DB.batch(stmts);
+		const permittedLocalMentions: LocalMentionRow[] = [];
+		for (const mention of localMentions) {
+			if (await canSurfaceStatusToViewer(statusId, mention.account_id)) {
+				permittedLocalMentions.push(mention);
+			}
+		}
+		if (permittedLocalMentions.length === 0) return;
 
 		// Send streaming event for DM
 		try {
@@ -607,16 +657,14 @@ class CreateProcessor extends BaseProcessor {
 					},
 				});
 
-				for (const m of localMentions) {
+				for (const m of permittedLocalMentions) {
 					const userRow = await env.DB.prepare('SELECT id FROM users WHERE account_id = ?1 LIMIT 1').bind(m.account_id).first<{ id: string }>();
 					if (userRow) {
 						try {
-							const doId = (env as Record<string, any>).STREAMING_DO?.idFromName(userRow.id);
-							const stub = (env as Record<string, any>).STREAMING_DO?.get(doId);
-							await stub.fetch('https://streaming/event', {
-								method: 'POST',
-								headers: { 'Content-Type': 'application/json' },
-								body: JSON.stringify({ event: 'update', payload: dmPayload, stream: ['user', 'direct'] }),
+							await sendStreamEvent(userRow.id, {
+								event: 'update',
+								payload: dmPayload,
+								stream: ['user', 'direct'],
 							});
 						} catch { /* streaming failure shouldn't block */ }
 					}
@@ -630,6 +678,6 @@ export async function processCreate(
 	activity: APActivity,
 	localAccountId: string | null,
 	options: CreateProcessorOptions = {},
-): Promise<void> {
-	await new CreateProcessor(localAccountId).process(activity, options);
+): Promise<boolean> {
+	return new CreateProcessor(localAccountId).process(activity, options);
 }

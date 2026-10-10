@@ -6,6 +6,7 @@ import { requireScope } from '../../../../middleware/scopeCheck';
 import { AppError } from '../../../../middleware/errorHandler';
 import { STATUS_JOIN_SQL, serializeStatusEnriched } from './fetch';
 import { muteStatus } from '../../../../services/status';
+import { assertStatusViewable } from '../../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -20,8 +21,10 @@ app.post('/:id/mute', authRequired, requireScope('write:mutes'), async (c) => {
     `${STATUS_JOIN_SQL} WHERE s.id = ?1 AND s.deleted_at IS NULL`,
   ).bind(statusId).first();
   if (!row) throw new AppError(404, 'Record not found');
+  await assertStatusViewable(statusId, currentAccountId);
 
-  await muteStatus(currentAccountId, statusId);
+  const changed = await muteStatus(currentAccountId, statusId);
+  c.set('contributionApplied', changed);
 
   const status = await serializeStatusEnriched(row as Record<string, unknown>, domain, currentAccountId, env.CACHE);
   status.muted = true;

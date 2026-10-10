@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import type { AppVariables } from '../../../types';
 import { authOptional, authRequired } from '../../../middleware/auth';
+import { requireScope } from '../../../middleware/scopeCheck';
 import { AppError } from '../../../middleware/errorHandler';
 
 type HonoEnv = { Variables: AppVariables };
@@ -62,7 +63,7 @@ app.get('/', authOptional, async (c) => {
 });
 
 // POST /api/v1/announcements/:id/dismiss — dismiss announcement
-app.post('/:id/dismiss', authRequired, async (c) => {
+app.post('/:id/dismiss', authRequired, requireScope('write:accounts'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
   const announcementId = c.req.param('id');
 
@@ -76,11 +77,12 @@ app.post('/:id/dismiss', authRequired, async (c) => {
     throw new AppError(404, 'Record not found');
   }
 
-  await env.DB.prepare(
+  const inserted = await env.DB.prepare(
     'INSERT OR IGNORE INTO announcement_dismissals (announcement_id, account_id) VALUES (?1, ?2)',
   )
     .bind(announcementId, currentAccount.id)
     .run();
+  c.set('contributionApplied', (inserted.meta?.changes ?? 0) > 0);
 
   return c.json({}, 200);
 });

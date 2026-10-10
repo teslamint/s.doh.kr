@@ -8,14 +8,20 @@ const BASE = 'https://test.siliconbeest.local';
 describe('Search API', () => {
   let user: { accountId: string; userId: string; token: string };
   let other: { accountId: string; userId: string; token: string };
+  let restricted: { accountId: string; userId: string; token: string };
+  let searchableStatus: { id: string; uri: string };
 
   beforeAll(async () => {
     await applyMigration();
     user = await createTestUser('searchuser');
     other = await createTestUser('searchother');
+    restricted = await createTestUser('searchrestricted');
+    await env.DB.prepare(
+      "UPDATE oauth_access_tokens SET scopes = 'write' WHERE user_id = ?1",
+    ).bind(restricted.userId).run();
 
     // Create a status with a hashtag and text for searching
-    await SELF.fetch(`${BASE}/api/v1/statuses`, {
+    const statusResponse = await SELF.fetch(`${BASE}/api/v1/statuses`, {
       method: 'POST',
       headers: authHeaders(user.token),
       body: JSON.stringify({
@@ -23,6 +29,8 @@ describe('Search API', () => {
         visibility: 'public',
       }),
     });
+    expect(statusResponse.status).toBe(200);
+    searchableStatus = await statusResponse.json<{ id: string; uri: string }>();
   });
 
   // -------------------------------------------------------------------
@@ -100,6 +108,40 @@ describe('Search API', () => {
       expect(stored?.visibility).toBe('public');
     });
 
+    it('stores remote Article objects as statuses', async () => {
+      const now = new Date().toISOString();
+      const remoteActorUri = 'https://article-author.example/ap/actors/alice';
+      const articleUri = 'https://article-author.example/ap/articles/2026/07/long-form-post';
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO accounts
+          (id, username, domain, display_name, note, uri, url, avatar_url, avatar_static_url,
+           header_url, header_static_url, locked, bot, discoverable, manually_approves_followers,
+           statuses_count, followers_count, following_count, created_at, updated_at)
+         VALUES ('article_actor', 'alice', 'article-author.example', '', '', ?1,
+           'https://article-author.example/@alice', '', '', '', '', 0, 0, 1, 0, 0, 0, 0, ?2, ?2)`,
+      ).bind(remoteActorUri, now).run();
+
+      await processCreate({
+        type: 'Create',
+        actor: remoteActorUri,
+        object: {
+          type: 'Article',
+          id: articleUri,
+          attributedTo: remoteActorUri,
+          to: 'as:Public',
+          content: '<h1>Long-form post</h1><p>Article body</p>',
+        },
+      }, user.accountId, { fanout: false, notify: false });
+
+      const stored = await env.DB.prepare(
+        'SELECT content, visibility FROM statuses WHERE uri = ?1 LIMIT 1',
+      ).bind(articleUri).first<{ content: string; visibility: string }>();
+      expect(stored).toMatchObject({
+        content: '<h1>Long-form post</h1><p>Article body</p>',
+        visibility: 'public',
+      });
+    });
+
     it('does not return private or direct statuses by URL to unauthorized users', async () => {
       const privateRes = await SELF.fetch(`${BASE}/api/v1/statuses`, {
         method: 'POST',
@@ -132,6 +174,71 @@ describe('Search API', () => {
         expect(body.statuses.some((item: Record<string, any>) => item.id === status.id)).toBe(false);
       }
     });
+
+    it('keeps a locally-known exact public URL available anonymously without network resolution', async () => {
+      const res = await SELF.fetch(
+        `${BASE}/api/v2/search?q=${encodeURIComponent(searchableStatus.uri)}&type=statuses`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json<{ statuses: Array<{ id: string }> }>();
+      expect(body.statuses.map((status) => status.id)).toContain(searchableStatus.id);
+    });
+
+    it('resolves a long status URL without type through exact lookup instead of LIKE search', async () => {
+      expect(new TextEncoder().encode(`%${searchableStatus.uri}%`).byteLength).toBeGreaterThan(50);
+
+      const res = await SELF.fetch(
+        `${BASE}/api/v2/search?q=${encodeURIComponent(searchableStatus.uri)}&resolve=true`,
+        { headers: authHeaders(user.token) },
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json<{
+        accounts: Array<{ id: string }>;
+        statuses: Array<{ id: string }>;
+        hashtags: Array<{ name: string }>;
+      }>();
+      expect(body.accounts).toEqual([]);
+      expect(body.hashtags).toEqual([]);
+      expect(body.statuses.map((status) => status.id)).toContain(searchableStatus.id);
+    });
+
+    it('returns empty LIKE-backed results for an oversized non-URL query', async () => {
+      const oversizedQuery = '가'.repeat(17);
+      expect(new TextEncoder().encode(`%${oversizedQuery}%`).byteLength).toBeGreaterThan(50);
+
+      const res = await SELF.fetch(
+        `${BASE}/api/v2/search?q=${encodeURIComponent(oversizedQuery)}`,
+        { headers: authHeaders(user.token) },
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ accounts: [], statuses: [], hashtags: [] });
+    });
+
+    it('requires an authorized user for status full-text, offset, and remote resolution modes', async () => {
+      const paths = [
+        '/api/v2/search?q=Searching&type=statuses',
+        '/api/v2/search?q=searchuser&type=accounts&offset=0',
+        `/api/v2/search?q=${encodeURIComponent(searchableStatus.uri)}&type=statuses&resolve=true`,
+      ];
+
+      for (const path of paths) {
+        expect((await SELF.fetch(`${BASE}${path}`)).status).toBe(401);
+      }
+    });
+
+    it('requires read:search scope for authenticated-only search modes', async () => {
+      const paths = [
+        '/api/v2/search?q=Searching&type=statuses',
+        '/api/v2/search?q=searchuser&type=accounts&offset=0',
+        `/api/v2/search?q=${encodeURIComponent(searchableStatus.uri)}&type=statuses&resolve=true`,
+      ];
+
+      for (const path of paths) {
+        expect((await SELF.fetch(`${BASE}${path}`, {
+          headers: authHeaders(restricted.token),
+        })).status).toBe(403);
+      }
+    });
   });
 
   // -------------------------------------------------------------------
@@ -152,6 +259,8 @@ describe('Search API', () => {
     it('allows search without auth (public search)', async () => {
       const res = await SELF.fetch(`${BASE}/api/v2/search?q=test`);
       expect(res.status).toBe(200);
+      const body = await res.json<{ statuses: Array<{ id: string }> }>();
+      expect(body.statuses).toEqual([]);
     });
   });
 });

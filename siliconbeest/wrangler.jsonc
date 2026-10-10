@@ -1,6 +1,7 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "siliconbeest",
+	"preview_urls": true,
 	"compatibility_date": "2026-06-16",
 	"main": ".output/server/index.mjs",
 	"assets": {
@@ -28,13 +29,13 @@
 		"mode": "smart"
 	},
 
-	// Environment Variables (secrets set via `wrangler secret put`)
+	// Environment Variables (set SETUP_SECRET via `wrangler secret put SETUP_SECRET` before first-run setup)
 	"vars": {
 		"INSTANCE_DOMAIN": "s.doh.kr",
 		"INSTANCE_TITLE": "SiliconBeest",
 		"REPOSITORY_URL": "https://github.com/teslamint/s.doh.kr",
 		"REGISTRATION_MODE": "approval",
-		"SKIP_SIGNATURE_VERIFICATION": true
+		"SKIP_SIGNATURE_VERIFICATION": false
 	},
 
 	// D1 Database

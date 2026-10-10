@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../types';
 import { authRequired, authOptional } from '../../../middleware/auth';
+import { requireScope } from '../../../middleware/scopeCheck';
 import { AppError } from '../../../middleware/errorHandler';
 import { generateUlid } from '../../../utils/ulid';
 import type { TagRow } from '../../../types/db';
@@ -49,7 +50,7 @@ app.get('/:id', authOptional, async (c) => {
 });
 
 // POST /api/v1/tags/:id/follow — follow tag
-app.post('/:id/follow', authRequired, async (c) => {
+app.post('/:id/follow', authRequired, requireScope('write:follows'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
   const domain = env.INSTANCE_DOMAIN;
   const tagName = c.req.param('id').toLowerCase();
@@ -64,28 +65,20 @@ app.post('/:id/follow', authRequired, async (c) => {
     throw new AppError(404, 'Record not found');
   }
 
-  // Check if already following
-  const existing = await env.DB.prepare(
-    'SELECT id FROM tag_follows WHERE account_id = ?1 AND tag_id = ?2',
+  const followId = generateUlid();
+  const now = new Date().toISOString();
+  const inserted = await env.DB.prepare(
+    'INSERT OR IGNORE INTO tag_follows (id, account_id, tag_id, created_at) VALUES (?1, ?2, ?3, ?4)',
   )
-    .bind(currentAccount.id, tag.id)
-    .first();
-
-  if (!existing) {
-    const followId = generateUlid();
-    const now = new Date().toISOString();
-    await env.DB.prepare(
-      'INSERT INTO tag_follows (id, account_id, tag_id, created_at) VALUES (?1, ?2, ?3, ?4)',
-    )
-      .bind(followId, currentAccount.id, tag.id, now)
-      .run();
-  }
+    .bind(followId, currentAccount.id, tag.id, now)
+    .run();
+  c.set('contributionApplied', (inserted.meta?.changes ?? 0) > 0);
 
   return c.json(serializeTagResponse(tag, domain, true));
 });
 
 // POST /api/v1/tags/:id/unfollow — unfollow tag
-app.post('/:id/unfollow', authRequired, async (c) => {
+app.post('/:id/unfollow', authRequired, requireScope('write:follows'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
   const domain = env.INSTANCE_DOMAIN;
   const tagName = c.req.param('id').toLowerCase();
@@ -100,11 +93,12 @@ app.post('/:id/unfollow', authRequired, async (c) => {
     throw new AppError(404, 'Record not found');
   }
 
-  await env.DB.prepare(
+  const removed = await env.DB.prepare(
     'DELETE FROM tag_follows WHERE account_id = ?1 AND tag_id = ?2',
   )
     .bind(currentAccount.id, tag.id)
     .run();
+  c.set('contributionApplied', (removed.meta?.changes ?? 0) > 0);
 
   return c.json(serializeTagResponse(tag, domain, false));
 });

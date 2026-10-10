@@ -44,7 +44,7 @@ siliconbeest/
 | Technology                  | Purpose                            |
 | --------------------------- | ---------------------------------- |
 | Hono                        | API server framework               |
-| Fedify v2.1.0               | ActivityPub federation              |
+| Fedify v2.3.2               | ActivityPub federation              |
 | Vue 3                       | Reactive UI framework              |
 | Vue Router 5                | Client-side routing with auth guards |
 | Vite 7                      | Build tool and dev server          |
@@ -277,11 +277,13 @@ Set these via `wrangler secret put` or in `.dev.vars` for local development:
 | Secret | Description |
 |--------|-------------|
 | `OTP_ENCRYPTION_KEY` | 256-bit hex key (64 characters) for AES-GCM encryption of TOTP secrets. Generate with: `openssl rand -hex 32` |
+| `SETUP_SECRET` | 256-bit hex secret required by `/api/v1/setup` before the first admin can be created. Generate with: `openssl rand -hex 32` |
 
 Example `.dev.vars`:
 
 ```ini
 OTP_ENCRYPTION_KEY=your-64-char-hex-key-here
+SETUP_SECRET=your-64-char-hex-setup-secret-here
 ```
 
 After adding secrets, run `npx wrangler types` to update TypeScript type definitions.
@@ -292,7 +294,7 @@ After adding secrets, run `npx wrangler types` to update TypeScript type definit
 
 ### Prerequisites
 
-- Node.js >= 20.19.0 or >= 22.12.0
+- Node.js 22.13+, 24.11+, or 26+
 
 ### Setup
 

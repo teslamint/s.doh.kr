@@ -2,14 +2,17 @@ import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { env } from 'cloudflare:workers';
 import { authOptional } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 import { AppError } from '../../../../middleware/errorHandler';
 import type { StatusEditRow, MediaAttachmentRow } from '../../../../types/db';
+import { assertStatusViewable } from '../../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
 interface StatusWithAccountRow {
   id: string;
   account_id: string;
+  visibility: string;
   content: string;
   content_warning: string;
   sensitive: number;
@@ -36,9 +39,10 @@ interface StatusWithAccountRow {
 const app = new Hono<HonoEnv>();
 
 // GET /api/v1/statuses/:id/history — get edit history
-app.get('/:id/history', authOptional, async (c) => {
+app.get('/:id/history', authOptional, requireScope('read:statuses'), async (c) => {
   const statusId = c.req.param('id');
   const domain = env.INSTANCE_DOMAIN;
+  const currentAccountId = c.get('currentUser')?.account_id ?? null;
 
   const status = await env.DB.prepare(
     `SELECT s.*, a.username, a.domain AS account_domain, a.display_name, a.note AS account_note,
@@ -54,6 +58,7 @@ app.get('/:id/history', authOptional, async (c) => {
     .first<StatusWithAccountRow>();
 
   if (!status) throw new AppError(404, 'Record not found');
+  await assertStatusViewable(statusId, currentAccountId);
 
   const acct = status.account_domain
     ? `${status.username}@${status.account_domain}`

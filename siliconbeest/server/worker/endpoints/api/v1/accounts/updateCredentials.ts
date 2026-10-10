@@ -70,6 +70,14 @@ const app = new Hono<HonoEnv>();
 app.patch('/update_credentials', authRequired, requireScope('write:accounts'), async (c) => {
   const currentUser = c.get('currentUser')!;
   const domain = env.INSTANCE_DOMAIN;
+  const before = await env.DB.prepare(
+    `SELECT a.avatar_url, a.header_url, a.display_name, a.note, a.locked, a.bot,
+            a.discoverable, a.hide_collections, a.fields, a.emoji_tags,
+            u.locale, u.default_privacy, u.default_quote_policy
+     FROM accounts a JOIN users u ON u.account_id = a.id
+     WHERE a.id = ?1`,
+  ).bind(currentUser.account_id).first<Record<string, unknown>>();
+  if (!before) throw new AppError(404, 'Record not found');
 
   let body: Record<string, unknown> = {};
   let avatarFile: File | null = null;
@@ -150,6 +158,10 @@ app.patch('/update_credentials', authRequired, requireScope('write:accounts'), a
   if (body.discoverable !== undefined) {
     updates.push(`discoverable = ?${paramIdx++}`);
     params.push(body.discoverable ? 1 : 0);
+  }
+  if (body.hide_collections !== undefined) {
+    updates.push(`hide_collections = ?${paramIdx++}`);
+    params.push(body.hide_collections ? 1 : 0);
   }
 
   // Handle profile fields/metadata
@@ -251,6 +263,28 @@ app.patch('/update_credentials', authRequired, requireScope('write:accounts'), a
 
   if (!row) throw new AppError(404, 'Record not found');
 
+  const profileFields = [
+    'avatar_url',
+    'header_url',
+    'display_name',
+    'note',
+    'locked',
+    'bot',
+    'discoverable',
+    'hide_collections',
+    'fields',
+    'emoji_tags',
+    'locale',
+    'default_privacy',
+    'default_quote_policy',
+  ] as const;
+  c.set(
+    'contributionApplied',
+    avatarFile !== null
+      || headerFile !== null
+      || profileFields.some((field) => before[field] !== row[field]),
+  );
+
   const acct = row.domain ? `${row.username}@${row.domain}` : (row.username as string);
 
   return c.json({
@@ -283,6 +317,7 @@ app.patch('/update_credentials', authRequired, requireScope('write:accounts'), a
       note: (row.note as string) || '',
       fields: parseFields(row.fields as string | null),
       follow_requests_count: 0,
+      hide_collections: !!(row.hide_collections),
       quote_policy: normalizeQuotePolicy(row.default_quote_policy),
     },
   });

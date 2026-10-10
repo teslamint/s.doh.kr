@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { Status, EmojiReaction } from '@/types/mastodon'
 import { useAuthStore } from '@/stores/auth'
 import { getReactions, addReaction, removeReaction } from '@/api/mastodon/statuses'
 import EmojiPicker from '../common/EmojiPicker.vue'
+import { canUseAuthenticatedActions } from '@/utils/permissions'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   status: Status
@@ -14,6 +18,12 @@ const emit = defineEmits<{
 }>()
 
 const authStore = useAuthStore()
+const accountCanAct = computed(() => canUseAuthenticatedActions({
+  authenticated: authStore.isAuthenticated,
+  accountLoaded: authStore.currentUser !== null,
+  accountSuspended: authStore.currentUser?.suspended,
+  accountMemorial: authStore.currentUser?.memorial,
+}))
 const reactions = ref<EmojiReaction[]>([])
 const loading = ref(false)
 const showPicker = ref(false)
@@ -45,7 +55,7 @@ watch(() => props.status.id, () => {
 
 // 리액션 토글 (추가/제거)
 async function toggleReaction(reaction: EmojiReaction) {
-  if (!authStore.token || loading.value) return
+  if (!accountCanAct.value || !authStore.token || loading.value) return
   loading.value = true
 
   try {
@@ -70,7 +80,7 @@ async function toggleReaction(reaction: EmojiReaction) {
 // 이모지 피커에서 선택
 async function handleEmojiSelect(emoji: string) {
   showPicker.value = false
-  if (!authStore.token || loading.value) return
+  if (!accountCanAct.value || !authStore.token || loading.value) return
   loading.value = true
 
   // 커스텀 이모지는 :shortcode: 형식으로 전달됨 → 백엔드에도 그대로 전달
@@ -87,6 +97,7 @@ async function handleEmojiSelect(emoji: string) {
 }
 
 function togglePicker() {
+  if (!accountCanAct.value || loading.value) return
   showPicker.value = !showPicker.value
   if (showPicker.value) {
     nextTick(() => {
@@ -138,22 +149,22 @@ function getShortcode(name: string): string {
 </script>
 
 <template>
-  <div v-if="hasReactions || authStore.isAuthenticated" class="flex flex-wrap items-center gap-1.5">
+  <div v-if="hasReactions || accountCanAct" class="flex flex-wrap items-center gap-1.5">
     <!-- 리액션 칩들 -->
     <TransitionGroup name="reaction">
       <button
         v-for="reaction in reactions"
         :key="reaction.name"
         @click="!isRemoteCustomEmoji(reaction) && toggleReaction(reaction)"
-        :disabled="loading || !authStore.isAuthenticated || isRemoteCustomEmoji(reaction)"
-        class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-all duration-200 select-none"
+        :disabled="loading || !accountCanAct || isRemoteCustomEmoji(reaction)"
+        class="inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-all duration-200 select-none"
         :class="[
           isRemoteCustomEmoji(reaction)
             ? 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed opacity-70'
             : reaction.me
               ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-300 dark:border-indigo-600 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50'
               : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600/50',
-          isRemoteCustomEmoji(reaction) ? '' : loading ? 'opacity-60 cursor-wait' : authStore.isAuthenticated ? 'cursor-pointer' : 'cursor-default',
+          isRemoteCustomEmoji(reaction) ? '' : loading ? 'opacity-60 cursor-wait' : accountCanAct ? 'cursor-pointer' : 'cursor-default',
         ]"
         :title="isRemoteCustomEmoji(reaction) ? `${reaction.name} (다른 서버의 이모지)` : reaction.name"
       >
@@ -162,27 +173,28 @@ function getShortcode(name: string): string {
           v-if="isCustomEmoji(reaction)"
           :src="reaction.url!"
           :alt="getShortcode(reaction.name)"
-          class="h-5 w-5 object-contain"
+          class="h-6 w-6 object-contain"
           loading="lazy"
         />
         <!-- 유니코드 이모지 -->
-        <span v-else class="text-base leading-none">{{ reaction.name }}</span>
+        <span v-else class="text-lg leading-none">{{ reaction.name }}</span>
         <!-- 카운트 -->
         <span class="tabular-nums">{{ reaction.count }}</span>
       </button>
     </TransitionGroup>
 
     <!-- + 버튼 (이모지 피커 열기) -->
-    <div v-if="authStore.isAuthenticated" class="relative">
+    <div v-if="accountCanAct" class="relative">
       <button
         ref="pickerBtnRef"
         @click.stop="togglePicker"
         :disabled="loading"
-        class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-dashed border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:border-indigo-400 dark:hover:border-indigo-500 hover:text-indigo-500 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+        class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-dashed border-gray-300 text-gray-400 transition-colors hover:border-indigo-400 hover:bg-indigo-50 hover:text-indigo-500 dark:border-gray-600 dark:text-gray-500 dark:hover:border-indigo-500 dark:hover:bg-indigo-900/20 dark:hover:text-indigo-400"
         :class="loading ? 'opacity-60 cursor-wait' : 'cursor-pointer'"
-        title="리액션 추가"
+        :title="t('status.react')"
+        :aria-label="t('status.react')"
       >
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
         </svg>
       </button>

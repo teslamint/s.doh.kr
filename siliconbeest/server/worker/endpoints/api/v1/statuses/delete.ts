@@ -4,10 +4,13 @@ import type { AppVariables } from '../../../../types';
 import { env } from 'cloudflare:workers';
 import { authRequired } from '../../../../middleware/auth';
 import { requireScope } from '../../../../middleware/scopeCheck';
-import { sendToFollowers } from '../../../../federation/helpers/send';
+import { sendToRecipients } from '../../../../federation/helpers/send';
+import { getStatusFederationAudience } from '../../../../federation/helpers/status-audience';
 import { Delete as APDelete, Tombstone } from '@fedify/fedify/vocab';
 import { generateUlid } from '../../../../utils/ulid';
 import { deleteStatus } from '../../../../services/status';
+import { sendStreamEventToDurableObject } from '../../../../services/streaming';
+import { canBroadcastStatusToPublicStreams } from '../../../../../../../packages/shared/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -35,7 +38,15 @@ app.delete('/:id', authRequired, requireScope('write:statuses'), async (c) => {
           published: Temporal.Now.instant(),
         });
         const fed = c.get('federation');
-        await sendToFollowers(fed, account.username as string, del);
+        const audience = await getStatusFederationAudience({
+          id: row.id,
+          accountId: row.account_id,
+          visibility: row.visibility,
+          local: row.local,
+          accountDomain: null,
+          inReplyToAccountId: row.in_reply_to_account_id,
+        });
+        await sendToRecipients(fed, account.username as string, audience.recipients, del);
       }
     } catch (e) {
       console.error('Federation delivery failed for status delete:', e);
@@ -44,32 +55,32 @@ app.delete('/:id', authRequired, requireScope('write:statuses'), async (c) => {
 
   // Broadcast delete event via streaming to all connected clients
   try {
-    // Send to public streams
-    const doId = env.STREAMING_DO.idFromName('__public__');
-    const stub = env.STREAMING_DO.get(doId);
-    await stub.fetch(new Request('http://internal/event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const author = await env.DB.prepare(
+      'SELECT suspended_at, silenced_at FROM accounts WHERE id = ?1 LIMIT 1',
+    ).bind(currentAccountId).first<{
+      suspended_at: string | null;
+      silenced_at: string | null;
+    }>();
+    if (canBroadcastStatusToPublicStreams({
+      visibility: row.visibility,
+      statusDeleted: false,
+      authorSuspended: author ? author.suspended_at !== null : null,
+      authorSilenced: author ? author.silenced_at !== null : null,
+    })) {
+      await sendStreamEventToDurableObject('__public__', {
         event: 'delete',
         payload: statusId,
         stream: ['public', 'public:local'],
-      }),
-    }));
+      });
+    }
 
     // Send to the author's user stream
     const user = c.get('currentUser')!;
-    const userDoId = env.STREAMING_DO.idFromName(user.id);
-    const userStub = env.STREAMING_DO.get(userDoId);
-    await userStub.fetch(new Request('http://internal/event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        event: 'delete',
-        payload: statusId,
-        stream: ['user'],
-      }),
-    }));
+    await sendStreamEventToDurableObject(user.id, {
+      event: 'delete',
+      payload: statusId,
+      stream: ['user'],
+    });
   } catch { /* non-critical */ }
 
   // Return the deleted status per Mastodon spec

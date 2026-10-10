@@ -2,6 +2,15 @@ import { env } from 'cloudflare:workers';
 import { parsePaginationParams, buildPaginationQuery } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
 import { AppError } from '../middleware/errorHandler';
+import {
+  buildReblogOriginalSurfaceSqlPredicate,
+  buildStatusRelationshipSqlPredicate,
+  buildStatusVisibilitySqlPredicate,
+} from './permissions';
+import type {
+  PermissionSqlPredicate,
+  StatusPermissionSqlSource,
+} from './permissions';
 
 /**
  * Shared account columns selected alongside statuses in timeline queries.
@@ -39,25 +48,101 @@ export interface TagTimelineOpts extends TimelinePaginationOpts {
   viewerAccountId?: string;
 }
 
+type StatusTimelineCursor = {
+  id: string;
+  created_at: string;
+};
+
 // ----------------------------------------------------------------
-// Block/Mute filter helper
+// Relationship/account-state surface filter helper
 // ----------------------------------------------------------------
 
-function addBlockMuteFilters(
+function addStatusSurfaceFilters(
   conditions: string[],
   binds: (string | number)[],
   viewerAccountId: string | undefined,
-  statusAlias = 's',
+  statusSource: StatusPermissionSqlSource = 'status',
 ): void {
-  if (!viewerAccountId) return;
-  conditions.push(
-    `${statusAlias}.account_id NOT IN (SELECT target_account_id FROM blocks WHERE account_id = ?)`,
+  const now = new Date().toISOString();
+  const relationship = buildStatusRelationshipSqlPredicate(
+    statusSource,
+    viewerAccountId ?? null,
+    now,
   );
-  binds.push(viewerAccountId);
-  conditions.push(
-    `${statusAlias}.account_id NOT IN (SELECT target_account_id FROM mutes WHERE account_id = ? AND (expires_at IS NULL OR expires_at > ?))`,
-  );
-  binds.push(viewerAccountId, new Date().toISOString());
+  conditions.push(relationship.sql);
+  binds.push(...relationship.bindings);
+  if (statusSource === 'status') {
+    const reblogOriginal = buildReblogOriginalSurfaceSqlPredicate(
+      viewerAccountId ?? null,
+      now,
+    );
+    conditions.push(reblogOriginal.sql);
+    binds.push(...reblogOriginal.bindings);
+  }
+}
+
+function buildHomeTimelineMembershipPredicate(
+  accountId: string,
+): PermissionSqlPredicate {
+  return {
+    sql: `(
+      s.account_id = ?
+      OR EXISTS (
+        SELECT 1
+        FROM follows home_follow
+        WHERE home_follow.account_id = ?
+          AND home_follow.target_account_id = s.account_id
+          AND s.visibility != 'direct'
+          AND (s.reblog_of_id IS NULL OR COALESCE(home_follow.show_reblogs, 1) != 0)
+      )
+      OR (
+        s.visibility = 'direct'
+        AND EXISTS (
+          SELECT 1
+          FROM mentions home_mention
+          WHERE home_mention.status_id = s.id
+            AND home_mention.account_id = ?
+        )
+      )
+    )`,
+    bindings: [accountId, accountId, accountId],
+  };
+}
+
+async function addChronologicalCursorFilters(
+  pag: PaginationParams,
+  conditions: string[],
+  binds: (string | number)[],
+): Promise<boolean> {
+  const requestedIds = [...new Set([
+    pag.maxId,
+    pag.sinceId,
+    pag.minId,
+  ].filter((id): id is string => id !== undefined))];
+
+  const cursorEntries = await Promise.all(requestedIds.map(async (id) => {
+    const cursor = await env.DB.prepare(
+      'SELECT id, created_at FROM statuses WHERE id = ?1 LIMIT 1',
+    ).bind(id).first<StatusTimelineCursor>();
+    return [id, cursor] as const;
+  }));
+  const cursors = new Map(cursorEntries);
+
+  function addCursor(id: string | undefined, direction: 'before' | 'after'): boolean {
+    if (!id) return true;
+    const cursor = cursors.get(id);
+    if (!cursor) return false;
+    const comparison = direction === 'before' ? '<' : '>';
+    conditions.push(
+      `(s.created_at ${comparison} ? OR (s.created_at = ? AND s.id ${comparison} ?))`,
+    );
+    binds.push(cursor.created_at, cursor.created_at, cursor.id);
+    return true;
+  }
+
+  return addCursor(pag.maxId, 'before')
+    && addCursor(pag.sinceId, 'after')
+    && addCursor(pag.minId, 'after');
 }
 
 // ----------------------------------------------------------------
@@ -67,10 +152,9 @@ function addBlockMuteFilters(
 /**
  * Fetch the home timeline for the given account.
  *
- * Uses `hte.rowid` for ordering — it auto-increments on INSERT and correctly
- * reflects the order statuses entered the home timeline, regardless of whether
- * the status ID is local (00MN) or remote (01KM). Cursor pagination resolves
- * the status ID to its rowid via subquery.
+ * Derives membership from the viewer's follows and direct mentions instead of
+ * storing one timeline row per recipient. Ordering and pagination use the
+ * status timestamp plus ID as a stable tie-breaker.
  */
 export async function getHomeTimeline(
   accountId: string,
@@ -83,40 +167,25 @@ export async function getHomeTimeline(
     limit: opts.limit != null ? String(opts.limit) : undefined,
   });
 
-  const conditions: string[] = ['hte.account_id = ?'];
-  const binds: (string | number)[] = [accountId];
-  let orderClause = 'hte.rowid DESC';
+  const membership = buildHomeTimelineMembershipPredicate(accountId);
+  const conditions: string[] = [membership.sql];
+  const binds: (string | number)[] = [...membership.bindings];
+  const orderDirection = pag.minId ? 'ASC' : 'DESC';
 
-  if (pag.maxId) {
-    conditions.push(
-      'hte.rowid < (SELECT rowid FROM home_timeline_entries WHERE account_id = ? AND status_id = ?)',
-    );
-    binds.push(accountId, pag.maxId);
-  }
-  if (pag.sinceId) {
-    conditions.push(
-      'hte.rowid > (SELECT rowid FROM home_timeline_entries WHERE account_id = ? AND status_id = ?)',
-    );
-    binds.push(accountId, pag.sinceId);
-  }
-  if (pag.minId) {
-    conditions.push(
-      'hte.rowid > (SELECT rowid FROM home_timeline_entries WHERE account_id = ? AND status_id = ?)',
-    );
-    binds.push(accountId, pag.minId);
-    orderClause = 'hte.rowid ASC';
-  }
+  if (!await addChronologicalCursorFilters(pag, conditions, binds)) return [];
 
   conditions.push('s.deleted_at IS NULL');
-  addBlockMuteFilters(conditions, binds, accountId);
+  const visibility = buildStatusVisibilitySqlPredicate('status', accountId);
+  conditions.push(visibility.sql);
+  binds.push(...visibility.bindings);
+  addStatusSurfaceFilters(conditions, binds, accountId);
 
   const sql = `
     SELECT s.*, ${ACCOUNT_COLUMNS}
-    FROM home_timeline_entries hte
-    JOIN statuses s ON s.id = hte.status_id
+    FROM statuses s
     JOIN accounts a ON a.id = s.account_id
     WHERE ${conditions.join(' AND ')}
-    ORDER BY ${orderClause}
+    ORDER BY s.created_at ${orderDirection}, s.id ${orderDirection}
     LIMIT ?
   `;
   binds.push(pag.limit);
@@ -130,9 +199,8 @@ export async function getHomeTimeline(
 // ----------------------------------------------------------------
 
 /**
- * Fetch the merged "social" timeline: everything in the viewer's home
- * timeline plus every local public status. A single cursor over s.id keeps
- * pagination consistent across both sources (unlike home's rowid cursor).
+ * Fetch the merged "social" timeline: everything derived for the viewer's
+ * home timeline plus every local public status.
  */
 export async function getSocialTimeline(
   accountId: string,
@@ -145,36 +213,33 @@ export async function getSocialTimeline(
     limit: opts.limit != null ? String(opts.limit) : undefined,
   });
 
-  const { whereClause, limitValue, params } = buildPaginationQuery(pag, 's.id');
-  const orderClause = pag.minId ? 's.id ASC' : 's.id DESC';
+  const membership = buildHomeTimelineMembershipPredicate(accountId);
+  const orderDirection = pag.minId ? 'ASC' : 'DESC';
 
   const conditions: string[] = [
     `(
-      EXISTS (
-        SELECT 1 FROM home_timeline_entries hte
-        WHERE hte.account_id = ? AND hte.status_id = s.id
-      )
+      ${membership.sql}
       OR (s.local = 1 AND s.visibility = 'public')
     )`,
     's.deleted_at IS NULL',
   ];
-  const binds: (string | number)[] = [accountId];
+  const binds: (string | number)[] = [...membership.bindings];
 
-  if (whereClause) {
-    conditions.push(whereClause);
-    binds.push(...params);
-  }
-  addBlockMuteFilters(conditions, binds, accountId);
+  if (!await addChronologicalCursorFilters(pag, conditions, binds)) return [];
+  const visibility = buildStatusVisibilitySqlPredicate('status', accountId);
+  conditions.push(visibility.sql);
+  binds.push(...visibility.bindings);
+  addStatusSurfaceFilters(conditions, binds, accountId);
 
   const sql = `
     SELECT s.*, ${ACCOUNT_COLUMNS}
     FROM statuses s
     JOIN accounts a ON a.id = s.account_id
     WHERE ${conditions.join(' AND ')}
-    ORDER BY ${orderClause}
+    ORDER BY s.created_at ${orderDirection}, s.id ${orderDirection}
     LIMIT ?
   `;
-  binds.push(limitValue);
+  binds.push(pag.limit);
 
   const { results } = await env.DB.prepare(sql).bind(...binds).all();
   return (results ?? []) as Record<string, unknown>[];
@@ -214,7 +279,7 @@ export async function getPublicTimeline(
   if (opts.onlyMedia) {
     conditions.push('EXISTS (SELECT 1 FROM media_attachments ma WHERE ma.status_id = s.id)');
   }
-  addBlockMuteFilters(conditions, binds, opts.viewerAccountId);
+  addStatusSurfaceFilters(conditions, binds, opts.viewerAccountId);
 
   const sql = `
     SELECT s.*, ${ACCOUNT_COLUMNS}
@@ -264,7 +329,7 @@ export async function getTagTimeline(
   if (opts.onlyMedia) {
     conditions.push('EXISTS (SELECT 1 FROM media_attachments ma WHERE ma.status_id = s.id)');
   }
-  addBlockMuteFilters(conditions, binds, opts.viewerAccountId);
+  addStatusSurfaceFilters(conditions, binds, opts.viewerAccountId);
 
   const sql = `
     SELECT s.*, ${ACCOUNT_COLUMNS}
@@ -318,7 +383,10 @@ export async function getListTimeline(
     conditions.push(whereClause);
     binds.push(...params);
   }
-  addBlockMuteFilters(conditions, binds, accountId);
+  const visibility = buildStatusVisibilitySqlPredicate('status', accountId);
+  conditions.push(visibility.sql);
+  binds.push(...visibility.bindings);
+  addStatusSurfaceFilters(conditions, binds, accountId);
 
   const sql = `
     SELECT s.*, ${ACCOUNT_COLUMNS}
