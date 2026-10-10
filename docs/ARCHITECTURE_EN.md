@@ -93,7 +93,7 @@ SiliconBeest is composed of three independent Cloudflare Workers that cooperate 
          |  D1 | | R2 | |   KV   |    | siliconbeest-queue-consumer|
          | SQL | |blob | |cache/  |    |                            |
          | DB  | |store| |session |    |  - Federation delivery     |
-         +-----+ +----+ +--------+    |  - Timeline fanout         |
+         +-----+ +----+ +--------+    |  - Timeline streaming      |
                                        |  - Notifications           |
          +------------------+         |  - Media processing        |
          |   Durable Objects |         |  - Web Push sending        |
@@ -138,7 +138,7 @@ A dedicated worker that consumes messages from both queues and processes them as
 **Responsibilities:**
 - Federation activity delivery to remote inboxes (with HTTP signature signing)
 - Activity fanout to all followers' inboxes
-- Timeline fanout (inserting statuses into home timelines)
+- Authorized follower and public timeline streaming
 - Notification creation and Web Push delivery
 - Remote account and status fetching
 - Media thumbnail processing
@@ -149,7 +149,7 @@ A dedicated worker that consumes messages from both queues and processes them as
 **Key bindings:**
 - `DB` (D1), `MEDIA_BUCKET` (R2), `CACHE` (KV) -- same resources as the API worker
 - `QUEUE_FEDERATION` + `QUEUE_INTERNAL` -- both as consumer and producer (for re-enqueue)
-- `WORKER` (Service binding) -- calls back to the API worker for Durable Object access
+- `INTERNAL_CONNECTION_MAIN` (Service binding) -- invokes the main Worker's private `Internal` RPC entrypoint for Durable Object access
 
 **Queue configuration:**
 - Federation queue: max 5 retries, Dead Letter Queue (`siliconbeest-federation-dlq`)
@@ -447,7 +447,6 @@ siliconbeest-worker/
       bookmark.ts                   # Bookmark queries
       favourite.ts                  # Favourite queries
       follow.ts                     # Follow/unfollow operations
-      homeTimeline.ts               # Home timeline entry management
       instance.ts                   # Known instance tracking
       media.ts                      # Media attachment CRUD
       mention.ts                    # Mention extraction and storage
@@ -523,7 +522,7 @@ siliconbeest-queue-consumer/
     handlers/
       deliverActivity.ts            # Deliver a single activity to a remote inbox
       deliverActivityFanout.ts      # Fan out activity to all followers' inboxes
-      timelineFanout.ts             # Insert status into followers' home timelines
+      timelineFanout.ts             # Stream statuses to followers and public feeds
       createNotification.ts         # Create notification + enqueue Web Push
       processMedia.ts               # Process media thumbnails
       fetchRemoteAccount.ts         # Fetch and cache a remote AP actor
@@ -1146,9 +1145,8 @@ Blocked email domains for registration.
 
 ### Timeline & User Preferences
 
-#### `home_timeline_entries`
-
-Materialized home timeline. Each entry links an `account_id` to a `status_id`.
+Home timelines are derived on read from `statuses`, `follows`, and direct
+`mentions`; they are not materialized per user.
 
 #### `markers`
 
@@ -1778,7 +1776,7 @@ Remote custom emojis are cached locally with `domain` set to the source instance
 | `deliver_report` | Federation | Forward a report to a remote instance |
 | `forward_activity` | Federation | Forward activity with original HTTP headers preserved |
 | `import_item` | Federation | Process a single CSV import item |
-| `timeline_fanout` | Internal | Insert a status into all followers' home timelines |
+| `timeline_fanout` | Internal | Stream a status to authorized followers and public feeds |
 | `create_notification` | Internal | Create a notification record and enqueue Web Push |
 | `process_media` | Internal | Process media thumbnails |
 | `send_web_push` | Internal | Encrypt and send a Web Push notification |
@@ -2401,7 +2399,7 @@ SiliconBeest avoids Cloudflare Containers to keep costs low. This means:
 | `CACHE` | KV Namespace | (by ID) |
 | `QUEUE_FEDERATION` | Queue Producer/Consumer | `siliconbeest-federation` |
 | `QUEUE_INTERNAL` | Queue Producer/Consumer | `siliconbeest-internal` |
-| `WORKER` | Service Binding | `siliconbeest-worker` |
+| `INTERNAL_CONNECTION_MAIN` | Service Binding (RPC) | `siliconbeest` / `Internal` entrypoint |
 
 #### Vue Frontend (`siliconbeest-vue/wrangler.jsonc`)
 

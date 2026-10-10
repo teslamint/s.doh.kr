@@ -1,6 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import { createI18n } from 'vue-i18n';
 import en from '@/i18n/locales/en.json';
+import ja from '@/i18n/locales/ja.json';
+import ko from '@/i18n/locales/ko.json';
+import zhCN from '@/i18n/locales/zh-CN.json';
+import zhTW from '@/i18n/locales/zh-TW.json';
+
+function leafKeys(value: unknown, prefix = ''): string[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return prefix ? [prefix] : [];
+  }
+
+  return Object.entries(value).flatMap(([key, child]) =>
+    leafKeys(child, prefix ? `${prefix}.${key}` : key),
+  );
+}
 
 describe('i18n', () => {
   function makeI18n() {
@@ -67,6 +81,58 @@ describe('i18n', () => {
     it('has error keys', () => {
       const i18n = makeI18n();
       expect(i18n.global.t('error.notFound')).toBe('Page not found');
+    });
+
+    it('points an empty deck to the upper-left Columns button', () => {
+      const i18n = makeI18n();
+      expect(i18n.global.t('deck.columns_empty')).toBe(
+        'No columns are selected. Use the Columns button in the upper-left to choose what to load.',
+      );
+    });
+  });
+
+  describe('Locale parity', () => {
+    it('keeps every supported locale aligned with the English keys', () => {
+      const englishKeys = leafKeys(en).sort();
+      for (const messages of [ko, ja, zhCN, zhTW]) {
+        expect(leafKeys(messages).sort()).toEqual(englishKeys);
+      }
+    });
+
+    it('warns about the 24-hour re-registration restriction before cancellation', () => {
+      for (const messages of [en, ko, ja, zhCN, zhTW]) {
+        expect(messages.auth.registration_cancel_confirm).toContain('24');
+      }
+    });
+
+    it('provides the public invitation guide in every supported locale', () => {
+      for (const messages of [en, ko, ja, zhCN, zhTW]) {
+        expect(messages.about.invitation_guide_link).toBeTruthy();
+        expect(messages.invitation_guide.signup_cooldown).toContain('24');
+        expect(messages.invitation_guide.audit_admin).toBeTruthy();
+      }
+    });
+
+    it('renders account handles without treating @ as linked-message syntax', () => {
+      const locales = { en, ko, ja, 'zh-CN': zhCN, 'zh-TW': zhTW };
+      const i18n = createI18n({
+        legacy: false,
+        locale: 'en',
+        fallbackLocale: 'en',
+        messages: locales,
+        missingWarn: false,
+        fallbackWarn: false,
+      });
+
+      for (const locale of Object.keys(locales)) {
+        i18n.global.locale.value = locale;
+        expect(i18n.global.t('auth.registration_confirmation_description', {
+          username: 'alice',
+        })).toContain('@alice');
+        expect(i18n.global.t('admin_invitation_credits.adjust_account', {
+          username: 'alice',
+        })).toContain('@alice');
+      }
     });
   });
 

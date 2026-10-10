@@ -7,14 +7,24 @@
  */
 
 import { env } from 'cloudflare:workers';
-export type StreamEventPayload = {
-  /** Mastodon event type: update, notification, delete, status.update, filters_changed */
-  event: string;
-  /** JSON-stringified payload */
-  payload: string;
-  /** Target stream names (e.g. ["user", "user:notification"]) */
-  stream?: string[];
-};
+import type { StreamEventPayload } from '../internal-contract';
+
+export type { StreamEventPayload } from '../internal-contract';
+
+export async function sendStreamEventToDurableObject(
+  userId: string,
+  event: StreamEventPayload,
+): Promise<void> {
+  const streamingDo = env.STREAMING_DO;
+  if (!streamingDo) {
+    throw new Error('Streaming requires the STREAMING_DO binding');
+  }
+
+  const doId = streamingDo.idFromName(userId);
+  const stub = streamingDo.get(doId);
+
+  await stub.sendEvent(event);
+}
 
 /**
  * Send an event to a user's StreamingDO instance.
@@ -26,14 +36,21 @@ export async function sendStreamEvent(
   userId: string,
   event: StreamEventPayload,
 ): Promise<void> {
-  const doId = env.STREAMING_DO.idFromName(userId);
-  const stub = env.STREAMING_DO.get(doId);
+  // The main Worker owns StreamingDO and can access it directly. Shared
+  // federation processors also run inside the queue consumer, which reaches
+  // the owning Worker through its named INTERNAL_CONNECTION_MAIN service binding instead.
+  if (!env.STREAMING_DO) {
+    if (!env.INTERNAL_CONNECTION_MAIN) {
+      throw new Error(
+        'Streaming requires either STREAMING_DO or INTERNAL_CONNECTION_MAIN binding',
+      );
+    }
 
-  await stub.fetch('https://streaming/event', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(event),
-  });
+    await env.INTERNAL_CONNECTION_MAIN.sendStreamEvent(userId, event);
+    return;
+  }
+
+  await sendStreamEventToDurableObject(userId, event);
 }
 
 /**

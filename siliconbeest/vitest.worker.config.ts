@@ -6,11 +6,14 @@ export default defineConfig({
     cloudflareTest({
       main: './server/worker/index.ts',
       miniflare: {
-        compatibilityDate: '2024-12-18',
+        compatibilityDate: '2026-06-16',
         compatibilityFlags: ['nodejs_compat'],
         d1Databases: ['DB'],
         r2Buckets: ['MEDIA_BUCKET'],
         kvNamespaces: ['CACHE', 'SESSIONS', 'FEDIFY_KV'],
+        durableObjects: {
+          STREAMING_DO: 'StreamingDO',
+        },
         queueProducers: {
           QUEUE_FEDERATION: { queueName: 'siliconbeest-federation' },
           QUEUE_INTERNAL: { queueName: 'siliconbeest-internal' },
@@ -21,6 +24,7 @@ export default defineConfig({
           INSTANCE_TITLE: 'SiliconBeest Test',
           REGISTRATION_MODE: 'open',
           OTP_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+          SETUP_SECRET: 'test-setup-secret',
         },
       },
     }),

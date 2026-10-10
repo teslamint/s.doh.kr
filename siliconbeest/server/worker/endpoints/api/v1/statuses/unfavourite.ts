@@ -10,6 +10,7 @@ import { getStatusFederationAudience } from '../../../../federation/helpers/stat
 import { Like, Undo } from '@fedify/fedify/vocab';
 import { generateUlid } from '../../../../utils/ulid';
 import { unfavouriteStatus } from '../../../../services/status';
+import { canViewStatusById } from '../../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -30,7 +31,9 @@ app.post('/:id/unfavourite', authRequired, requireScope('write:favourites'), asy
     'SELECT id FROM favourites WHERE account_id = ?1 AND status_id = ?2',
   ).bind(currentAccountId, statusId).first();
 
-  await unfavouriteStatus(currentAccountId, statusId);
+  const canView = await canViewStatusById(statusId, currentAccountId);
+  const removed = await unfavouriteStatus(currentAccountId, statusId);
+  c.set('contributionApplied', removed);
 
   // Federation: deliver Undo(Like)
   if (existing) {
@@ -56,8 +59,9 @@ app.post('/:id/unfavourite', authRequired, requireScope('write:favourites'), asy
         if (row.account_domain) {
           const authorUri = row.account_uri as string;
           await sendToRecipient(fed, currentAccount.username as string, authorUri, undo);
-          // Remote-origin statuses keep the normal actor follower fanout.
-          await sendToFollowers(fed, currentAccount.username as string, undo);
+          if (row.visibility === 'public' || row.visibility === 'unlisted') {
+            await sendToFollowers(fed, currentAccount.username as string, undo);
+          }
         } else {
           const audience = await getStatusFederationAudience(
             {
@@ -78,6 +82,7 @@ app.post('/:id/unfavourite', authRequired, requireScope('write:favourites'), asy
     }
   }
 
+  if (!canView) throw new AppError(404, 'Record not found');
   const status = await serializeStatusEnriched(row as Record<string, unknown>, domain, currentAccountId, env.CACHE);
   status.favourited = false;
   if (existing) {

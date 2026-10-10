@@ -21,7 +21,7 @@
 	"vars": {
 		"INSTANCE_DOMAIN": "s.doh.kr",
 		"REPOSITORY_URL": "https://github.com/teslamint/s.doh.kr",
-		"SKIP_SIGNATURE_VERIFICATION": true,
+		"SKIP_SIGNATURE_VERIFICATION": false
 	},
 	// D1 Database
 	"d1_databases": [
@@ -83,11 +83,12 @@
 		]
 	},
 
-	// Service binding to main worker (for Durable Object access)
+	// Capability-scoped RPC binding to the main Worker's private entrypoint
 	"services": [
 		{
-			"binding": "WORKER",
-			"service": "siliconbeest"
+			"binding": "INTERNAL_CONNECTION_MAIN",
+			"service": "siliconbeest",
+			"entrypoint": "Internal"
 		}
 	]
 }

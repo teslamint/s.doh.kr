@@ -1,51 +1,45 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useTurnstile } from '@/composables/useTurnstile'
+import { useRoute } from 'vue-router'
+import { withCurrentDesign } from '@/utils/safeRedirect'
 
 const { t } = useI18n()
-const { token: turnstileToken, isEnabled: turnstileEnabled, render: renderTurnstile, reset: resetTurnstile } = useTurnstile()
+const route = useRoute()
 
 const username = ref('')
 const password = ref('')
 const loading = ref(false)
 const error = ref('')
 const passkeyLoading = ref(false)
-const turnstileRendered = ref(false)
 
 const supportsPasskeys = computed(() => typeof window !== 'undefined' && !!window.PublicKeyCredential)
+const registerTarget = computed(() => ({
+  path: withCurrentDesign('/register', route.path),
+  query: route.query.redirect ? { redirect: route.query.redirect } : undefined,
+}))
 
 const props = defineProps<{ serverError?: string }>()
-const emit = defineEmits(['submit', 'passkey'])
+const emit = defineEmits<{
+  submit: [credentials: { username: string; password: string }]
+  passkey: []
+}>()
 
-// Allow parent to reset loading states after async operations complete
-defineExpose({ loading, passkeyLoading })
-
-function tryRenderTurnstile() {
-  if (turnstileEnabled.value && !turnstileRendered.value) {
-    renderTurnstile('turnstile-login')
-    turnstileRendered.value = true
-  }
+function finishLogin() {
+  loading.value = false
 }
 
-onMounted(() => {
-  tryRenderTurnstile()
-})
+function finishPasskey() {
+  passkeyLoading.value = false
+}
 
-// Instance store may load after mount — watch for it
-watch(turnstileEnabled, (enabled) => {
-  if (enabled) tryRenderTurnstile()
-})
+defineExpose({ finishLogin, finishPasskey })
 
-async function handleSubmit() {
+function handleSubmit() {
   if (!username.value || !password.value) return
-  if (turnstileEnabled.value && !turnstileToken.value) {
-    error.value = t('turnstile.verification_failed')
-    return
-  }
   loading.value = true
   error.value = ''
-  emit('submit', { username: username.value, password: password.value, turnstile_token: turnstileToken.value })
+  emit('submit', { username: username.value, password: password.value })
 }
 
 function handlePasskeyLogin() {
@@ -107,16 +101,13 @@ function handlePasskeyLogin() {
 
     <!-- Forgot password / Find username -->
     <div class="flex justify-between text-sm">
-      <router-link to="/auth/find-username" class="text-indigo-600 dark:text-indigo-400 hover:underline">
+      <router-link :to="withCurrentDesign('/auth/find-username', route.path)" class="text-indigo-600 dark:text-indigo-400 hover:underline">
         {{ t('auth.find_username') }}
       </router-link>
-      <router-link to="/auth/forgot-password" class="text-indigo-600 dark:text-indigo-400 hover:underline">
+      <router-link :to="withCurrentDesign('/auth/forgot-password', route.path)" class="text-indigo-600 dark:text-indigo-400 hover:underline">
         {{ t('auth.forgot_password') }}
       </router-link>
     </div>
-
-    <!-- Turnstile CAPTCHA -->
-    <div v-if="turnstileEnabled" id="turnstile-login" class="flex justify-center"></div>
 
     <!-- Submit -->
     <button
@@ -150,7 +141,7 @@ function handlePasskeyLogin() {
     <!-- Register link -->
     <p class="text-center text-sm text-gray-500 dark:text-gray-400">
       {{ t('auth.no_account') }}
-      <router-link to="/register" class="text-indigo-600 dark:text-indigo-400 hover:underline font-medium">
+      <router-link :to="registerTarget" class="text-indigo-600 dark:text-indigo-400 hover:underline font-medium">
         {{ t('auth.sign_up') }}
       </router-link>
     </p>

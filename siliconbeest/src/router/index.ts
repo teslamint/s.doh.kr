@@ -60,6 +60,24 @@ const router = createRouter({
       meta: { titleKey: 'About' },
     },
     {
+      path: '/about/invitations',
+      name: 'about-invitations',
+      component: () => import('@/views/InvitationGuideView.vue'),
+      meta: { titleKey: 'Invitation guide' },
+    },
+    {
+      path: '/aurora/about/invitations',
+      name: 'aurora-about-invitations',
+      component: () => import('@/views/InvitationGuideView.vue'),
+      meta: { titleKey: 'Invitation guide' },
+    },
+    {
+      path: '/old/about/invitations',
+      name: 'old-about-invitations',
+      component: () => import('@/legacy/views/InvitationGuideView.vue'),
+      meta: { titleKey: 'Invitation guide' },
+    },
+    {
       path: '/terms',
       name: 'terms',
       component: () => import('@/views/TermsView.vue'),
@@ -100,6 +118,12 @@ const router = createRouter({
       meta: { titleKey: 'Register' },
     },
     {
+      path: '/auth/registration',
+      name: 'registration-workflow',
+      component: () => import('@/views/RegistrationWorkflowView.vue'),
+      meta: { titleKey: 'Registration' },
+    },
+    {
       path: '/oauth/authorize',
       name: 'oauth-authorize',
       component: () => import('@/views/OAuthAuthorizeView.vue'),
@@ -126,6 +150,13 @@ const router = createRouter({
     },
 
     // Authenticated routes
+    {
+      path: '/announcements',
+      name: 'announcements',
+      component: () => import('@/deck/views/DeckAnnouncementsView.vue'),
+      beforeEnter: requireAuth,
+      meta: { titleKey: 'Announcements' },
+    },
     {
       path: '/notifications',
       name: 'notifications',
@@ -238,6 +269,11 @@ const router = createRouter({
           name: 'settings-security',
           component: () => import('@/views/SettingsSecurityView.vue'),
         },
+        {
+          path: 'invitations',
+          name: 'settings-invitations',
+          component: () => import('@/views/SettingsInvitationsView.vue'),
+        },
       ],
     },
 
@@ -276,6 +312,16 @@ const router = createRouter({
           path: 'settings',
           name: 'admin-settings',
           component: () => import('@/views/AdminSettingsView.vue'),
+        },
+        {
+          path: 'invitation-credits',
+          name: 'admin-invitation-credits',
+          component: () => import('@/views/AdminInvitationCreditsView.vue'),
+        },
+        {
+          path: 'invitation-audit-logs',
+          name: 'admin-invitation-audit-logs',
+          component: () => import('@/views/AdminInvitationAuditLogsView.vue'),
         },
         {
           path: 'announcements',

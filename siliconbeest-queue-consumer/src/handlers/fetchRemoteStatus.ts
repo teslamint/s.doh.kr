@@ -7,15 +7,45 @@
  */
 
 import { env } from 'cloudflare:workers';
+import { isActor } from '@fedify/vocab';
 import { createFed } from '../fedify';
 import type { FetchRemoteStatusMessage } from '../shared/types/queue';
 import { pickSignerUsername } from '../../../packages/shared/services/signer';
 import { parseQuotePolicyFromInteractionPolicy } from '../../../packages/shared/utils/quotePolicy';
+import { getSuspendedDomains } from '../../../packages/shared/domain-blocks';
+import {
+  canStoreFetchedRemoteActor,
+  canStoreFetchedRemoteStatus,
+} from '../../../packages/shared/permissions';
 
 export async function handleFetchRemoteStatus(
   msg: FetchRemoteStatusMessage,
 ): Promise<void> {
   const { statusUri, signerAccountId } = msg;
+
+  let statusDomain: string;
+  try {
+    const statusUrl = new URL(statusUri);
+    if (statusUrl.protocol !== 'https:' && statusUrl.protocol !== 'http:') {
+      console.error(`Unsupported status URI scheme: ${statusUri}`);
+      return;
+    }
+    statusDomain = statusUrl.hostname.toLowerCase();
+  } catch {
+    console.error(`Invalid status URI: ${statusUri}`);
+    return;
+  }
+
+  if (statusDomain === env.INSTANCE_DOMAIN.toLowerCase()) {
+    console.warn(`Refusing remote fetch for local status URI ${statusUri}`);
+    return;
+  }
+
+  const suspendedDomains = await getSuspendedDomains(env.DB, [statusDomain]);
+  if (suspendedDomains.has(statusDomain)) {
+    console.log(`[remote-status] Skipping lookup for suspended domain ${statusDomain}`);
+    return;
+  }
 
   // Check if we already have this status
   const existing = await env.DB.prepare(
@@ -72,17 +102,93 @@ export async function handleFetchRemoteStatus(
     return;
   }
 
+  let authorDomain: string;
+  try {
+    authorDomain = new URL(authorUri).hostname.toLowerCase();
+  } catch {
+    console.warn(`Status ${statusUri} has an invalid attributedTo URL, dropping`);
+    return;
+  }
+  const uri = typeof objectDoc.id === 'string' ? objectDoc.id : null;
+  if (!uri || !canStoreFetchedRemoteStatus({
+    requestedStatusUri: statusUri,
+    statusUri: uri,
+    authorUri,
+    localInstanceDomain: env.INSTANCE_DOMAIN,
+    authorSuspended: false,
+  })) {
+    console.warn(`Status ${statusUri} failed remote identity attribution checks, dropping`);
+    return;
+  }
+
+  const suspendedAuthorDomains = await getSuspendedDomains(env.DB, [authorDomain]);
+  if (suspendedAuthorDomains.has(authorDomain)) {
+    console.log(
+      `[remote-status] Skipping status ${statusUri} attributed to suspended domain ${authorDomain}`,
+    );
+    return;
+  }
+
   // Resolve author account — check if we know them
   let authorAccountId: string | null = null;
   const authorRow = await env.DB.prepare(
-    `SELECT id FROM accounts WHERE uri = ?`,
+    `SELECT id, domain, suspended_at
+     FROM accounts
+     WHERE uri = ? AND domain IS NOT NULL`,
   )
     .bind(authorUri)
-    .first<{ id: string }>();
+    .first<{ id: string; domain: string; suspended_at: string | null }>();
 
   if (authorRow) {
+    if (!canStoreFetchedRemoteStatus({
+      requestedStatusUri: statusUri,
+      statusUri: uri,
+      authorUri,
+      localInstanceDomain: env.INSTANCE_DOMAIN,
+      authorSuspended: authorRow.suspended_at !== null,
+    }) || authorRow.domain.toLowerCase() !== authorDomain) {
+      console.log(`[remote-status] Skipping status from ineligible actor ${authorUri}`);
+      return;
+    }
     authorAccountId = authorRow.id;
   } else {
+    // A same-host attributedTo value is not proof that the resource is an
+    // Actor. Verify the unknown author before granting it ownership through a
+    // placeholder account.
+    const authorSigner = await pickSignerUsername(env.DB, signerAccountId ?? null);
+    if (!authorSigner) {
+      console.warn(`No local signer available to verify author ${authorUri}, dropping`);
+      return;
+    }
+    const authorFed = createFed();
+    const authorContext = authorFed.createContext(
+      new URL(`https://${env.INSTANCE_DOMAIN}`),
+      { env },
+    );
+    const authorLoader = await authorContext.getDocumentLoader({
+      identifier: authorSigner,
+    });
+    const authorObject = await authorContext.lookupObject(authorUri, {
+      documentLoader: authorLoader,
+    });
+    if (!authorObject || !isActor(authorObject)) {
+      console.warn(`Attributed author ${authorUri} is not an Actor, dropping status`);
+      return;
+    }
+    const authorDocument = (await authorObject.toJsonLd()) as Record<string, unknown>;
+    const verifiedAuthorUri = typeof authorDocument.id === 'string'
+      ? authorDocument.id
+      : null;
+    if (!canStoreFetchedRemoteActor({
+      requestedActorUri: authorUri,
+      actorUri: verifiedAuthorUri,
+      localInstanceDomain: env.INSTANCE_DOMAIN,
+      actorSuspended: false,
+    })) {
+      console.warn(`Attributed author identity mismatch for ${authorUri}, dropping status`);
+      return;
+    }
+
     // Enqueue fetch of the remote account
     await env.QUEUE_INTERNAL.send({
       type: 'fetch_remote_account',
@@ -90,21 +196,42 @@ export async function handleFetchRemoteStatus(
       ...(signerAccountId ? { signerAccountId } : {}),
     });
     // We still need an account_id — create a placeholder
-    authorAccountId = crypto.randomUUID();
-    const authorDomain = new URL(authorUri).hostname;
+    const placeholderAccountId = crypto.randomUUID();
     await env.DB.prepare(
-      `INSERT OR IGNORE INTO accounts (id, username, domain, uri, created_at, updated_at)
-       VALUES (?, '', ?, ?, datetime('now'), datetime('now'))`,
+      `INSERT OR IGNORE INTO accounts (
+         id, username, domain, uri, hide_collections, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, 1, datetime('now'), datetime('now'))`,
     )
-      .bind(authorAccountId, authorDomain, authorUri)
+      .bind(
+        placeholderAccountId,
+        `__pending_${placeholderAccountId}`,
+        authorDomain,
+        authorUri,
+      )
       .run();
+
+    const placeholder = await env.DB.prepare(
+      `SELECT id, domain, suspended_at
+       FROM accounts
+       WHERE uri = ? AND domain IS NOT NULL`,
+    )
+      .bind(authorUri)
+      .first<{ id: string; domain: string; suspended_at: string | null }>();
+    if (
+      !placeholder
+      || placeholder.domain.toLowerCase() !== authorDomain
+      || placeholder.suspended_at !== null
+    ) {
+      console.warn(`Unable to create an eligible placeholder for ${authorUri}, dropping`);
+      return;
+    }
+    authorAccountId = placeholder.id;
   }
 
   // Parse the AP Note fields
   const statusId = crypto.randomUUID();
   const content = (objectDoc.content as string) || '';
   const contentWarning = (objectDoc.summary as string) || null;
-  const uri = (objectDoc.id as string) || statusUri;
   const url = (objectDoc.url as string) || uri;
   const published = (objectDoc.published as string) || new Date().toISOString();
   const inReplyTo = (objectDoc.inReplyTo as string) || null;
@@ -126,7 +253,7 @@ export async function handleFetchRemoteStatus(
     : [];
 
   // Insert into statuses table
-  await env.DB.prepare(
+  const insertResult = await env.DB.prepare(
     `INSERT OR IGNORE INTO statuses (
        id, account_id, uri, url, content, content_warning,
        visibility, language, in_reply_to_id, sensitive,
@@ -149,6 +276,10 @@ export async function handleFetchRemoteStatus(
       published,
     )
     .run();
+  if (insertResult.meta.changes !== 1) {
+    console.log(`Status ${statusUri} was inserted concurrently, skipping derived rows`);
+    return;
+  }
 
   // Handle attachments if present
   const attachments = objectDoc.attachment as Record<string, unknown>[] | undefined;

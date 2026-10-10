@@ -17,7 +17,11 @@
  * so TypeScript resolves everything from the caller's node_modules.
  */
 
-import { isDomainBlocked, extractDomain } from '../domain-blocks';
+import {
+	extractDomain,
+	getSuspendedDomains,
+	isDomainBlocked,
+} from '../domain-blocks';
 import { buildActivityFromJsonLd } from './normalize';
 import { pickSignerForRemote } from '../services/signer';
 import { env } from 'cloudflare:workers';
@@ -91,7 +95,7 @@ interface FederationLike<TData> {
 	setInboxListeners(path: string, sharedPath: string): InboxListenerBuilder<TData>;
 }
 
-type ProcessorFn = (activity: any, accountId: string) => Promise<void>;
+type ProcessorFn = (activity: any, accountId: string) => Promise<boolean | void>;
 
 /** Fedify vocab activity classes — each caller passes their own to avoid dual-package hazard. */
 export interface InboxListenerVocab {
@@ -184,8 +188,10 @@ export function setupInboxListeners<TData>(
 		if (!actorId) return false;
 		const domain = extractDomain(actorId.href);
 		if (!domain) return false;
-		const result = await isDomainBlocked(env.DB, env.CACHE, domain);
-		if (result.blocked) {
+		// Suspension is an immediate control-plane action.  Read D1 directly so
+		// a stale or racing KV entry cannot briefly admit or reject activities.
+		const suspendedDomains = await getSuspendedDomains(env.DB, [domain]);
+		if (suspendedDomains.has(domain)) {
 			console.log(
 				`[inbox] Dropping activity from suspended domain: ${domain}`,
 			);
@@ -251,8 +257,8 @@ export function setupInboxListeners<TData>(
 				if (localAccountId === null) return;
 
 				const apActivity = await Promise.resolve(convert(activity));
-				await processor(apActivity, localAccountId);
-				if (afterProcess) {
+				const accepted = await processor(apActivity, localAccountId);
+				if (afterProcess && accepted === true) {
 					await afterProcess(ctx, activity, apActivity, localAccountId);
 				}
 			});
@@ -429,11 +435,13 @@ export function setupInboxListeners<TData>(
 						localAccountId,
 					);
 				} else {
-					await processors.processLike(
+					const accepted = await processors.processLike(
 						activity,
 						localAccountId,
 					);
-					await forwardActivityForLocalStatus(ctx, activity);
+					if (accepted === true) {
+						await forwardActivityForLocalStatus(ctx, activity);
+					}
 				}
 			});
 		})
@@ -480,14 +488,21 @@ export function setupInboxListeners<TData>(
 				if (flag.actorId) {
 					const domain = extractDomain(flag.actorId.href);
 					if (domain) {
+						const suspendedDomains = await getSuspendedDomains(env.DB, [domain]);
+						if (suspendedDomains.has(domain)) {
+							console.log(
+								`[inbox] Dropping Flag from suspended domain: ${domain}`,
+							);
+							return;
+						}
 						const blockResult = await isDomainBlocked(
 							env.DB,
 							env.CACHE,
 							domain,
 						);
-						if (blockResult.blocked || blockResult.rejectReports) {
+						if (blockResult.rejectReports) {
 							console.log(
-								`[inbox] Dropping Flag from blocked/reject-reports domain: ${domain}`,
+								`[inbox] Dropping Flag from reject-reports domain: ${domain}`,
 							);
 							return;
 						}

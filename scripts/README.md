@@ -64,6 +64,12 @@ export R2_BUCKET_NAME=my-media-bucket
 ./scripts/deploy.sh --domain social.example.com
 ```
 
+`SKIP_SIGNATURE_VERIFICATION` is also available as an explicit `true`/`false`
+operator setting in `scripts/config.env`. It defaults to `false`, and
+`sync-config.sh --apply` writes the same value to both federation workers.
+Keep it `false` in production; `true` disables inbound HTTP signature
+verification and is intended only for controlled testing or troubleshooting.
+
 ---
 
 ## Script Reference
@@ -102,9 +108,9 @@ Prompts for:
 
 What it does:
 1. Creates D1 database, R2 bucket, KV namespaces (CACHE, SESSIONS, FEDIFY_KV), Queues
-2. Generates VAPID key pair (ECDSA P-256) and OTP encryption key
+2. Generates VAPID key pair (ECDSA P-256), OTP encryption key, and first-run setup secret
 3. Updates `siliconbeest/wrangler.jsonc` with resource IDs
-4. Sets OTP_ENCRYPTION_KEY secret via `wrangler secret put`
+4. Sets OTP_ENCRYPTION_KEY and SETUP_SECRET secrets via `wrangler secret put`
 5. Stores VAPID keys in D1 settings table
 6. Applies D1 migrations
 7. Creates admin user
@@ -308,11 +314,14 @@ Without this rule, federation is completely broken -- no remote server can disco
 
 ## Secrets
 
-The unified architecture only requires **one** wrangler secret:
+The unified architecture requires these wrangler secrets:
 
 ```bash
 # OTP encryption key (for 2FA)
 wrangler secret put OTP_ENCRYPTION_KEY --name siliconbeest
+
+# First-run setup secret (required by /api/v1/setup)
+wrangler secret put SETUP_SECRET --name siliconbeest
 ```
 
 VAPID keys are stored in the D1 `settings` table (not env secrets).
@@ -337,6 +346,9 @@ Federation messages that exhaust their retries go to the DLQ. The queue consumer
 ```bash
 # WARNING: Invalidates all existing 2FA enrollments
 openssl rand -hex 32 | wrangler secret put OTP_ENCRYPTION_KEY --name siliconbeest
+
+# Generate/rotate the first-run setup secret
+openssl rand -hex 32 | wrangler secret put SETUP_SECRET --name siliconbeest
 ```
 
 ---

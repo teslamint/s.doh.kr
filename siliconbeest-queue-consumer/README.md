@@ -33,7 +33,7 @@ All messages use a discriminated union on the `type` field. The consumer reads `
 | `fetch_remote_account`     | federation | `handleFetchRemoteAccount`    | Fetch and cache an actor profile from a remote server                |
 | `fetch_remote_status`      | federation | `handleFetchRemoteStatus`     | Fetch and cache a status/note from a remote server                   |
 | `fetch_preview_card`       | internal   | `handleFetchPreviewCard`      | Fetch OpenGraph metadata for a URL and attach as a preview card      |
-| `timeline_fanout`          | internal   | `handleTimelineFanout`        | Insert a status into each follower's home timeline + emit streaming events |
+| `timeline_fanout`          | internal   | `handleTimelineFanout`        | Emit authorized follower and public streaming events |
 | `create_notification`      | internal   | `handleCreateNotification`    | Write a notification record, trigger web push + streaming            |
 | `process_media`            | internal   | `handleProcessMedia`          | Process an uploaded media file (resize, extract metadata) in R2      |
 | `send_web_push`            | internal   | `handleSendWebPush`           | Deliver a Web Push notification to a subscribed endpoint             |
@@ -91,7 +91,7 @@ The consumer is configured in `wrangler.jsonc`:
 | `CACHE`            | KV      | Cache remote actor/status lookups                            |
 | `QUEUE_FEDERATION` | Queues  | Re-enqueue federation jobs (fanout -> individual deliveries) |
 | `QUEUE_INTERNAL`   | Queues  | Re-enqueue internal jobs                                     |
-| `WORKER`           | Service | Service binding to main worker (for Durable Object access)  |
+| `INTERNAL_CONNECTION_MAIN`         | Service | Named RPC binding to the main worker's private `Internal` entrypoint |
 
 ### Queue Consumer Settings
 
@@ -136,8 +136,12 @@ When a forwarded activity is received (e.g., a reply to a local post from a remo
 
 ```bash
 npm install
+npm run cf-typegen
 npm run dev
 ```
+
+The type-generation command reads the main Worker's `Internal` entrypoint so
+RPC method signatures stay synchronized without requiring a production build.
 
 Note: Queue consumption in local development requires `wrangler dev` to be running for both the main worker and the consumer simultaneously. Messages enqueued by the worker will be delivered to the consumer in the local environment.
 

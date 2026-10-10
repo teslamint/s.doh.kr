@@ -36,7 +36,7 @@ SiliconBeest is a **GitHub Template Repository**. Deploy your own Fediverse inst
 - Admin API for moderation (accounts, reports, domain blocks, domain allows, IP blocks, email domain blocks, rules, settings, announcements, custom emojis, relays, measures)
 
 ### Federation (powered by Fedify)
-- **[Fedify](https://fedify.dev/) v2.1.0** -- TypeScript ActivityPub framework handling the protocol layer (signatures, WebFinger, NodeInfo, delivery)
+- **[Fedify](https://fedify.dev/) v2.3.2** -- TypeScript ActivityPub framework handling the protocol layer (signatures, WebFinger, NodeInfo, delivery)
 - **[`@fedify/cfworkers`](https://github.com/dahlia/fedify-cfworkers)** -- Cloudflare Workers adapter (KV store + Queue message dispatcher)
 - **ActivityPub** server-to-server protocol
 - **HTTP Signatures** (draft-cavage-http-signatures-12) -- RSA-SHA256 signing, handled by Fedify
@@ -155,7 +155,7 @@ A `packages/shared/` directory contains code shared between workers:
 | Layer         | Technology                                 |
 | ------------- | ------------------------------------------ |
 | API Server    | Hono + Chanfana + Zod on Cloudflare Workers |
-| Federation    | Fedify v2.1.0 + @fedify/cfworkers            |
+| Federation    | Fedify v2.3.2 + @fedify/cfworkers            |
 | Frontend      | Vue 3 + Vite + Tailwind CSS + Headless UI   |
 | Database      | Cloudflare D1 (SQLite)                      |
 | Object Store  | Cloudflare R2                               |
@@ -176,7 +176,7 @@ A `packages/shared/` directory contains code shared between workers:
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) >= 20
+- [Node.js](https://nodejs.org/) 22.13+, 24.11+, or 26+
 - [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) >= 4.x (`pnpm add -g wrangler`)
 - A **Workers Enabled** Cloudflare account
 - A domain managed by Cloudflare (for custom domain deployment)
@@ -336,6 +336,7 @@ See the full [scripts documentation](scripts/README.md) for all options and flag
 | Secret | Workers | Set by |
 |--------|---------|--------|
 | `OTP_ENCRYPTION_KEY` | worker | `setup.sh` |
+| `SETUP_SECRET` | worker | `setup.sh` / `install.sh` |
 
 > **VAPID keys** are stored in the D1 `settings` table (keys: `vapid_public_key`, `vapid_private_key`) and managed via the Admin settings page or `setup.sh`. They are **not** set as environment secrets.
 
@@ -346,6 +347,7 @@ See the full [scripts documentation](scripts/README.md) for all options and flag
 | `INSTANCE_DOMAIN` | Your instance domain | `siliconbeest.com` |
 | `INSTANCE_TITLE` | Instance display name | `SiliconBeest` |
 | `REGISTRATION_MODE` | `open` / `approval` / `closed` | `open` |
+| `SKIP_SIGNATURE_VERIFICATION` | Explicit `true` / `false` override for inbound HTTP signature verification; GitHub Actions reads this from GitHub Environment Variables during deploy | `false` |
 
 ### Frontend Environment (siliconbeest/.env)
 

@@ -1,5 +1,7 @@
 import { apiFetch } from '../client';
 import type { OAuthApp, Token } from '@/types/mastodon';
+import type { RegistrationRequiredResponse } from '@/types/registration';
+import type { RegistrationDesign } from '@/types/registration';
 
 export function createApp(params: {
   client_name: string;
@@ -53,11 +55,21 @@ export function revokeToken(params: {
 }
 
 // Direct login endpoint (non-standard, for the built-in frontend)
-export function login(username: string, password: string, turnstile_token?: string) {
-  return apiFetch<Token>('/v1/auth/login', {
+export function login(username: string, password: string) {
+  return apiFetch<LoginResponse>('/v1/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ username, password, turnstile_token }),
+    body: JSON.stringify({ username, password }),
   });
+}
+
+export interface LoginPreflightStatus {
+  required: boolean;
+  passed: boolean;
+  site_key: string;
+}
+
+export function getLoginPreflightStatus() {
+  return apiFetch<LoginPreflightStatus>('/v1/auth/login/preflight');
 }
 
 // Find username by email
@@ -68,13 +80,8 @@ export function findUsername(email: string) {
   });
 }
 
-export interface RegisterResponse {
-  access_token?: string;
-  token_type?: string;
-  scope?: string;
-  created_at?: number;
-  confirmation_required?: boolean;
-}
+export type LoginResponse = Token | RegistrationRequiredResponse;
+export type AccountRegistrationResponse = Token | RegistrationRequiredResponse;
 
 export function register(params: {
   username: string;
@@ -84,8 +91,11 @@ export function register(params: {
   locale?: string;
   reason?: string;
   turnstile_token?: string;
+  invite_token?: string;
+  redirect_uri?: string;
+  design?: RegistrationDesign;
 }) {
-  return apiFetch<RegisterResponse>('/v1/accounts', {
+  return apiFetch<AccountRegistrationResponse>('/v1/accounts', {
     method: 'POST',
     body: JSON.stringify(params),
   });

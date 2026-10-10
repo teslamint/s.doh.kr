@@ -9,15 +9,23 @@
  */
 
 import { DurableObject } from 'cloudflare:workers';
-
-interface StreamEvent {
-  event: 'update' | 'notification' | 'delete' | 'status.update' | 'filters_changed' | 'reaction';
-  payload: string;
-  stream?: string[];
-}
+import type { StreamEventPayload } from '../internal-contract';
 
 interface SessionAttachment {
   streams: string[];
+  allowedStreams: string[];
+}
+
+function parseAllowedStreams(header: string | null): string[] {
+  if (!header) return [];
+  try {
+    const value: unknown = JSON.parse(header);
+    return Array.isArray(value)
+      ? value.filter((stream): stream is string => typeof stream === 'string')
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 export class StreamingDO extends DurableObject {
@@ -31,11 +39,11 @@ export class StreamingDO extends DurableObject {
     // Restore hibernating WebSocket sessions
     this.ctx.getWebSockets().forEach((ws) => {
       const attachment = ws.deserializeAttachment() as SessionAttachment | null;
-      if (attachment) {
+      if (attachment && Array.isArray(attachment.allowedStreams)) {
         this.sessions.set(ws, attachment);
       } else {
-        // Fallback — no attachment means unknown stream, default to 'user'
-        this.sessions.set(ws, { streams: ['user'] });
+        // Pre-policy hibernated sockets have no verified scope attachment.
+        try { ws.close(1008, 'Reconnect required'); } catch { /* ignore */ }
       }
     });
 
@@ -45,19 +53,22 @@ export class StreamingDO extends DurableObject {
     );
   }
 
+  async sendEvent(event: StreamEventPayload): Promise<void> {
+    this.#broadcast(event);
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-
-    // Internal event delivery from queue consumer
-    if (url.pathname === '/event' && request.method === 'POST') {
-      const event = (await request.json()) as StreamEvent;
-      this.broadcast(event);
-      return new Response('ok', { status: 200 });
-    }
 
     // WebSocket upgrade for streaming
     if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
       const stream = url.searchParams.get('stream') || 'user';
+      const allowedStreams = parseAllowedStreams(
+        request.headers.get('X-Siliconbeest-Allowed-Streams'),
+      );
+      if (!allowedStreams.includes(stream)) {
+        return new Response('This action is outside the authorized scopes', { status: 403 });
+      }
 
       const pair = new WebSocketPair();
       const [client, server] = [pair[0], pair[1]];
@@ -66,7 +77,7 @@ export class StreamingDO extends DurableObject {
       this.ctx.acceptWebSocket(server);
 
       // Store stream subscription in attachment — survives hibernation
-      const attachment: SessionAttachment = { streams: [stream] };
+      const attachment: SessionAttachment = { streams: [stream], allowedStreams };
       server.serializeAttachment(attachment);
 
       // Also keep in-memory map for immediate broadcast
@@ -78,23 +89,27 @@ export class StreamingDO extends DurableObject {
       });
     }
 
-    return new Response('Expected WebSocket or /event POST', { status: 400 });
+    return new Response('Expected WebSocket upgrade', { status: 400 });
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     try {
       const data = JSON.parse(
         typeof message === 'string' ? message : new TextDecoder().decode(message),
-      );
+      ) as { type?: unknown; stream?: unknown };
 
-      if (data.type === 'subscribe' && data.stream) {
+      if (data.type === 'subscribe' && typeof data.stream === 'string') {
         const session = this.sessions.get(ws);
-        if (session && !session.streams.includes(data.stream)) {
+        if (!session?.allowedStreams.includes(data.stream)) {
+          ws.send(JSON.stringify({ error: 'This action is outside the authorized scopes', status: 403 }));
+          return;
+        }
+        if (!session.streams.includes(data.stream)) {
           session.streams.push(data.stream);
           // Persist updated streams
           ws.serializeAttachment(session);
         }
-      } else if (data.type === 'unsubscribe' && data.stream) {
+      } else if (data.type === 'unsubscribe' && typeof data.stream === 'string') {
         const session = this.sessions.get(ws);
         if (session) {
           session.streams = session.streams.filter((s) => s !== data.stream);
@@ -117,7 +132,7 @@ export class StreamingDO extends DurableObject {
     try { ws.close(); } catch { /* ignore */ }
   }
 
-  private broadcast(event: StreamEvent): void {
+  #broadcast(event: StreamEventPayload): void {
     const message = JSON.stringify({
       event: event.event,
       payload: event.payload,

@@ -20,6 +20,14 @@ import { createProof } from './integrityProofs';
 import { measureAsync, PerfTimer } from '../observability/performance';
 import { getUserAgent } from '../utils/repository';
 import { ensureInstanceRecord, recordDeliverySuccess, recordDeliveryFailure } from '../../../packages/shared/services/instance';
+import {
+  getDeliveryTargetDomains,
+  getSuspendedDomains,
+} from '../../../packages/shared/domain-blocks';
+import {
+  canSignActivity,
+  canSignTerminalActorDelete,
+} from '../../../packages/shared/permissions';
 
 // Crypto, signing, and signature preference from shared package
 import {
@@ -41,24 +49,73 @@ export async function handleDeliverActivity(
   const timer = new PerfTimer('deliverActivity.total', { inboxUrl, targetDomain });
   timer.start();
 
+  const deliveryDomains = await getDeliveryTargetDomains(env.DB, inboxUrl);
+  const suspendedDomains = await getSuspendedDomains(env.DB, deliveryDomains);
+  if (suspendedDomains.size > 0) {
+    console.log(`[deliver] Dropping delivery to suspended domain ${[...suspendedDomains].join(', ')}`);
+    timer.stopWithMetadata({ status: 'domain_suspended' });
+    return;
+  }
+
   // Load the actor's private key, Ed25519 key, and URI from D1
   const keyRow = await measureAsync(
     'deliverActivity.db.loadActorKey',
     () => env.DB.prepare(
-      `SELECT ak.private_key, ak.ed25519_private_key, a.uri
+      `SELECT ak.private_key, ak.ed25519_private_key, a.uri, a.domain,
+              a.suspended_at, a.memorial,
+              principal_user.disabled AS user_disabled,
+              principal_user.approved AS user_approved
        FROM actor_keys ak
        JOIN accounts a ON a.id = ak.account_id
+       LEFT JOIN users principal_user ON principal_user.account_id = a.id
        WHERE ak.account_id = ?`,
     )
       .bind(actorAccountId)
-      .first<{ private_key: string; ed25519_private_key: string | null; uri: string }>(),
+      .first<{
+        private_key: string;
+        ed25519_private_key: string | null;
+        uri: string;
+        domain: string | null;
+        suspended_at: string | null;
+        memorial: number;
+        user_disabled: number | null;
+        user_approved: number | null;
+      }>(),
     { actorAccountId }
   );
 
-  if (!keyRow) {
-    console.error(`No private key found for actor ${actorAccountId}, dropping message`);
-    timer.stopWithMetadata({ status: 'no_key' });
-    return; // consume the message — can't deliver without a key
+  const signingFacts = {
+    principalUri: keyRow?.uri ?? null,
+    activityActorUri: activity.actor,
+    isLocalPrincipal: keyRow ? keyRow.domain === null : null,
+    principalSuspended: keyRow ? keyRow.suspended_at !== null : null,
+    principalMemorial: keyRow ? keyRow.memorial !== 0 : null,
+    principalUserDisabled: keyRow?.user_disabled === null
+      || keyRow?.user_disabled === undefined
+      ? null
+      : keyRow.user_disabled !== 0,
+    principalUserApproved: keyRow?.user_approved === null
+      || keyRow?.user_approved === undefined
+      ? null
+      : keyRow.user_approved !== 0,
+    isSystemPrincipal: actorAccountId === '__instance__',
+    hasSigningKey: keyRow ? keyRow.private_key.length > 0 : null,
+  };
+  const canSign = canSignActivity(signingFacts)
+    || canSignTerminalActorDelete({
+      ...signingFacts,
+      activityType: activity.type,
+      activityObjectUri: typeof activity.object === 'string'
+        ? activity.object
+        : null,
+    });
+
+  if (!keyRow || !canSign) {
+    console.error(
+      `Dropping unauthorized activity delivery for actor ${actorAccountId}`,
+    );
+    timer.stopWithMetadata({ status: 'permission_denied' });
+    return;
   }
 
   const keyId = `${keyRow.uri}#main-key`;
