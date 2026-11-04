@@ -28,6 +28,14 @@ SiliconBeest is a **GitHub Template Repository**. Deploy your own Fediverse inst
 
 ---
 
+## Documentation
+
+- Deployment: [English](docs/deploy/README.md) | [한국어](docs/deploy/README.ko.md)
+- Architecture: [English](docs/ARCHITECTURE_EN.md) | [한국어](docs/ARCHITECTURE_KO.md)
+- Optional Workers AI: [English](docs/WORKERS_AI.md) | [한국어](docs/WORKERS_AI.ko.md)
+
+---
+
 ## Features
 
 ### Mastodon API Compatibility
@@ -36,7 +44,7 @@ SiliconBeest is a **GitHub Template Repository**. Deploy your own Fediverse inst
 - Admin API for moderation (accounts, reports, domain blocks, domain allows, IP blocks, email domain blocks, rules, settings, announcements, custom emojis, relays, measures)
 
 ### Federation (powered by Fedify)
-- **[Fedify](https://fedify.dev/) v2.3.2** -- TypeScript ActivityPub framework handling the protocol layer (signatures, WebFinger, NodeInfo, delivery)
+- **[Fedify](https://fedify.dev/) v2.3.3** -- TypeScript ActivityPub framework handling the protocol layer (signatures, WebFinger, NodeInfo, delivery)
 - **[`@fedify/cfworkers`](https://github.com/dahlia/fedify-cfworkers)** -- Cloudflare Workers adapter (KV store + Queue message dispatcher)
 - **ActivityPub** server-to-server protocol
 - **HTTP Signatures** (draft-cavage-http-signatures-12) -- RSA-SHA256 signing, handled by Fedify
@@ -155,7 +163,7 @@ A `packages/shared/` directory contains code shared between workers:
 | Layer         | Technology                                 |
 | ------------- | ------------------------------------------ |
 | API Server    | Hono + Chanfana + Zod on Cloudflare Workers |
-| Federation    | Fedify v2.3.2 + @fedify/cfworkers            |
+| Federation    | Fedify v2.3.3 + @fedify/cfworkers            |
 | Frontend      | Vue 3 + Vite + Tailwind CSS + Headless UI   |
 | Database      | Cloudflare D1 (SQLite)                      |
 | Object Store  | Cloudflare R2                               |
@@ -176,7 +184,7 @@ A `packages/shared/` directory contains code shared between workers:
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) 22.13+, 24.11+, or 26+
+- [Node.js](https://nodejs.org/) 25+
 - [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) >= 4.x (`pnpm add -g wrangler`)
 - A **Workers Enabled** Cloudflare account
 - A domain managed by Cloudflare (for custom domain deployment)
@@ -337,6 +345,7 @@ See the full [scripts documentation](scripts/README.md) for all options and flag
 |--------|---------|--------|
 | `OTP_ENCRYPTION_KEY` | worker | `setup.sh` |
 | `SETUP_SECRET` | worker | `setup.sh` / `install.sh` |
+| `SENTRY_DSN` (optional) | worker | manual: `wrangler secret put SENTRY_DSN` |
 
 > **VAPID keys** are stored in the D1 `settings` table (keys: `vapid_public_key`, `vapid_private_key`) and managed via the Admin settings page or `setup.sh`. They are **not** set as environment secrets.
 
@@ -349,13 +358,16 @@ See the full [scripts documentation](scripts/README.md) for all options and flag
 | `REGISTRATION_MODE` | `open` / `approval` / `closed` | `open` |
 | `SKIP_SIGNATURE_VERIFICATION` | Explicit `true` / `false` override for inbound HTTP signature verification; GitHub Actions reads this from GitHub Environment Variables during deploy | `false` |
 
+> **Observability drains** (optional): to forward the main worker's logs/traces to an OTLP backend such as Sentry, first create Logs/Traces destinations under **Workers & Pages → Observability** in the Cloudflare dashboard — each destination holds the OTLP endpoint URL *and* any auth headers (for Sentry: header `x-sentry-auth` with value `sentry sentry_key=<public key>`; copy both from Sentry's **Client Keys (DSN) → OpenTelemetry (OTLP)** page). Then set `OBSERVABILITY_LOGS_DESTINATIONS` / `OBSERVABILITY_TRACES_DESTINATIONS` (comma-separated destination names) as GitHub Environment Variables — or in `scripts/config.env` for manual deploys. `sync-config.sh` writes them into the `observability.logs` / `observability.traces` blocks of the main worker's `wrangler.jsonc`.
+
 ### Frontend Environment (siliconbeest/.env)
 
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `VITE_INSTANCE_DOMAIN` | Instance domain (for meta tags) | Yes |
 | `VITE_VAPID_PUBLIC_KEY` | VAPID public key (for Web Push) | Yes |
-| `VITE_SENTRY_DSN` | Sentry DSN for error tracking | No |
+| `VITE_SENTRY_DSN` | Sentry DSN for error tracking (CI deploys read the `SENTRY_CLIENT_DSN` GitHub Variable instead) | No |
+| `VITE_SENTRY_FEEDBACK` | `true` shows the Sentry user-feedback widget (requires `VITE_SENTRY_DSN`; CI deploys read the `SENTRY_FEEDBACK_ENABLED` GitHub Variable) | No |
 
 ---
 
@@ -402,13 +414,9 @@ Estimated cost with a Workers Enabled account:
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-change`
-3. Make your changes and add tests
-4. Run tests: `cd siliconbeest && pnpm exec vitest run --config vitest.worker.config.ts && pnpm exec vitest run`
-5. Submit a pull request
-
-All new API endpoints should include Zod validation schemas and integration tests.
+See the contributing guide for development setup, coding guidelines, test
+commands, database migration rules, and the pull request checklist:
+[English](CONTRIBUTING.md) | [한국어](CONTRIBUTING.ko.md).
 
 ---
 

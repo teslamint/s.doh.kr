@@ -59,6 +59,17 @@ describe('UI Store', () => {
       });
     });
 
+    it('preserves the optional recommended deck column in server preferences', () => {
+      const store = useUiStore();
+
+      store.hydrateFromServer('server-token', {
+        'ui:columns': '["recommended","home"]',
+        'ui:show_trending': null,
+      });
+
+      expect(store.columns).toEqual(['recommended', 'home']);
+    });
+
     it.each([
       ['missing response', null],
       ['null preference', { 'ui:columns': null, 'ui:show_trending': null }],
@@ -344,6 +355,28 @@ describe('UI Store', () => {
       store.openComposeModal();
       store.closeComposeModal();
       expect(store.composeModalOpen).toBe(false);
+    });
+
+    it('openComposeModal stores prefill text for the composer', () => {
+      const store = useUiStore();
+      store.openComposeModal({ prefillText: 'shared text\n\n#tag' });
+      expect(store.composeModalOpen).toBe(true);
+      expect(store.composePrefillText).toBe('shared text\n\n#tag');
+    });
+
+    it('opening without options clears any previous prefill', () => {
+      const store = useUiStore();
+      store.openComposeModal({ prefillText: 'shared text' });
+      store.closeComposeModal();
+      store.openComposeModal();
+      expect(store.composePrefillText).toBe('');
+    });
+
+    it('closeComposeModal clears the prefill text', () => {
+      const store = useUiStore();
+      store.openComposeModal({ prefillText: 'shared text' });
+      store.closeComposeModal();
+      expect(store.composePrefillText).toBe('');
     });
   });
 

@@ -7,6 +7,9 @@ import { useEmojis } from '@/composables/useEmojis'
 import { search as apiSearch } from '@/api/mastodon/search'
 import { useAuthStore } from '@/stores/auth'
 import EmojiPicker from '@/legacy/components/common/EmojiPicker.vue'
+import { articleMediaMarkdown } from '@/utils/markdownMedia'
+import { updateMedia } from '@/api/mastodon/media'
+import type { MediaAttachment } from '@/types/mastodon'
 
 const { t } = useI18n()
 const compose = useComposeStore()
@@ -16,11 +19,15 @@ const { fetchCustomEmojis, searchEmojis } = useEmojis()
 const props = defineProps<{
   replyTo?: { id: string; account: { acct: string }; mentions?: Array<{ acct: string }>; visibility?: string }
   maxChars?: number
+  initialText?: string
 }>()
 
 const emit = defineEmits<{
   submit: [payload: {
     content: string
+    object_type: 'Note' | 'Article'
+    title?: string
+    summary?: string
     spoiler_text: string
     visibility: string
     language: string
@@ -31,12 +38,16 @@ const emit = defineEmits<{
   }]
 }>()
 
-const content = ref('')
-const spoilerText = ref('')
-const showCw = ref(false)
+const isEditing = computed(() => compose.editingId !== null)
+const content = ref(isEditing.value ? compose.text : (props.initialText ?? ''))
+const objectType = ref<'Note' | 'Article'>(isEditing.value ? compose.objectType : 'Note')
+const articleTitle = ref(isEditing.value ? compose.title : '')
+const articleSummary = ref(isEditing.value ? compose.articleSummary : '')
+const spoilerText = ref(isEditing.value ? compose.contentWarning : '')
+const showCw = ref(isEditing.value ? compose.showContentWarning : false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
-const charLimit = computed(() => props.maxChars ?? 500)
+const charLimit = computed(() => objectType.value === 'Article' ? 100_000 : (props.maxChars ?? 500))
 const charsRemaining = computed(() => charLimit.value - content.value.length)
 
 // ── Emoji picker state ──────────────────────────────────────────────
@@ -177,6 +188,81 @@ function insertAtCursor(text: string) {
   })
 }
 
+function insertArticleMedia(media: MediaAttachment, fileName?: string): string {
+  const ta = textareaRef.value
+  const start = ta?.selectionStart ?? content.value.length
+  const end = ta?.selectionEnd ?? content.value.length
+  const before = content.value.substring(0, start)
+  const after = content.value.substring(end)
+  const prefix = before.length > 0 && !before.endsWith('\n') ? '\n\n' : ''
+  const suffix = after.length > 0 && !after.startsWith('\n') ? '\n\n' : ''
+  const mediaMarkdown = articleMediaMarkdown(media, fileName)
+  const markdown = `${prefix}${mediaMarkdown}${suffix}`
+  content.value = before + markdown + after
+  nextTick(() => {
+    if (!ta) return
+    const pos = start + markdown.length
+    ta.selectionStart = pos
+    ta.selectionEnd = pos
+    ta.focus()
+  })
+  compose.removeMedia(media.id, false)
+  return mediaMarkdown
+}
+
+const generatedArticleMediaMarkdown = new Map<string, string>()
+
+function trackGeneratedArticleDescription(
+  result: Promise<MediaAttachment | null>,
+  insertedMarkdown: string,
+  fileName?: string,
+) {
+  void result.then((resolvedMedia) => {
+    if (!resolvedMedia?.description) return
+    const generatedMarkdown = articleMediaMarkdown(resolvedMedia, fileName)
+    if (generatedMarkdown === insertedMarkdown) {
+      generatedArticleMediaMarkdown.set(resolvedMedia.id, generatedMarkdown)
+      return
+    }
+    const insertionIndex = content.value.indexOf(insertedMarkdown)
+    if (insertionIndex < 0) {
+      compose.markMediaDescriptionReviewed(resolvedMedia.id)
+      return
+    }
+    content.value = content.value.slice(0, insertionIndex)
+      + generatedMarkdown
+      + content.value.slice(insertionIndex + insertedMarkdown.length)
+    generatedArticleMediaMarkdown.set(resolvedMedia.id, generatedMarkdown)
+  })
+}
+
+function reviewEditedGeneratedArticleAlt() {
+  for (const [mediaId, generatedMarkdown] of generatedArticleMediaMarkdown) {
+    if (!content.value.includes(generatedMarkdown)) {
+      compose.markMediaDescriptionReviewed(mediaId)
+      generatedArticleMediaMarkdown.delete(mediaId)
+    }
+  }
+}
+
+async function addComposerMedia(file: File) {
+  const media = await compose.addMedia(file)
+  if (media && objectType.value === 'Article') {
+    const descriptionResult = media.description_generation_status === 'pending'
+      ? compose.waitForMediaDescription(media.id)
+      : null
+    const insertedMarkdown = insertArticleMedia(media, file.name)
+    if (descriptionResult) {
+      trackGeneratedArticleDescription(descriptionResult, insertedMarkdown, file.name)
+    } else if (
+      media.description_generation_status === 'complete'
+      && media.description
+    ) {
+      generatedArticleMediaMarkdown.set(media.id, insertedMarkdown)
+    }
+  }
+}
+
 // ── Autocomplete state ──────────────────────────────────────────────
 const autocompleteRef = ref<HTMLElement | null>(null)
 const autocompleteVisible = ref(false)
@@ -201,6 +287,7 @@ function closeAutocomplete() {
 }
 
 function onTextareaInput() {
+  reviewEditedGeneratedArticleAlt()
   detectAutocomplete()
 }
 
@@ -412,10 +499,63 @@ const quotePolicyIcons: Record<import('@/types/mastodon').QuotePolicy, string> =
   nobody: '⊘',
 }
 
+function loadEditingDraft() {
+  if (!compose.editingId) return
+  content.value = compose.text
+  objectType.value = compose.objectType
+  articleTitle.value = compose.title
+  articleSummary.value = compose.articleSummary
+  spoilerText.value = compose.contentWarning
+  showCw.value = compose.showContentWarning
+  selectedVisibility.value = visibilityOptions.find(option => option.value === compose.visibility)
+    ?? visibilityOptions[0]!
+  selectedLanguage.value = languageOptions.find(option => option.code === compose.language)
+    ?? languageOptions[1]!
+}
+
+watch(() => compose.editingId, (editingId) => {
+  if (editingId) {
+    generatedArticleMediaMarkdown.clear()
+    loadEditingDraft()
+  } else {
+    // Runs immediately on mount, so keep any share-intent prefill
+    content.value = props.initialText ?? ''
+    objectType.value = 'Note'
+    articleTitle.value = ''
+    articleSummary.value = ''
+    spoilerText.value = ''
+    showCw.value = false
+  }
+}, { immediate: true })
+
 const canSubmit = computed(() => {
   const hasContent = content.value.trim().length > 0 || compose.mediaAttachments.length > 0 || !!compose.quoteStatus
-  return hasContent && charsRemaining.value >= 0 && !compose.uploading
+  const validTitle = objectType.value !== 'Article'
+    || (articleTitle.value.trim().length > 0 && articleTitle.value.length <= 200)
+  return hasContent && validTitle && charsRemaining.value >= 0 && !compose.uploading
 })
+
+async function toggleArticle() {
+  objectType.value = objectType.value === 'Article' ? 'Note' : 'Article'
+  if (objectType.value === 'Article') {
+    if (compose.showPoll) togglePoll()
+    for (const media of [...compose.mediaAttachments]) {
+      const descriptionResult = media.description_generation_status === 'pending'
+        ? compose.waitForMediaDescription(media.id)
+        : null
+      const insertedMarkdown = insertArticleMedia(media)
+      if (descriptionResult) {
+        trackGeneratedArticleDescription(descriptionResult, insertedMarkdown)
+      } else if (
+        media.description_generation_status === 'complete'
+        && media.description
+      ) {
+        generatedArticleMediaMarkdown.set(media.id, insertedMarkdown)
+      }
+      await nextTick()
+    }
+  }
+}
 
 function togglePoll() {
   if (compose.showPoll) {
@@ -437,7 +577,7 @@ async function onFileSelect(event: Event) {
 
   for (const file of Array.from(input.files)) {
     if (compose.mediaAttachments.length >= 4) break
-    await compose.addMedia(file)
+    await addComposerMedia(file)
   }
 
   // Reset input so the same file can be re-selected
@@ -445,30 +585,75 @@ async function onFileSelect(event: Event) {
 }
 
 // ── ALT text editor ─────────────────────────────────────────────────
-const altEditMedia = ref<any>(null)
+const altEditMedia = ref<MediaAttachment | null>(null)
 const altEditText = ref('')
+const altEditDirty = ref(false)
+const altSaving = ref(false)
 
-function openAltEditor(media: any) {
+function openAltEditor(media: MediaAttachment) {
+  if (altSaving.value) return
   altEditMedia.value = media
   altEditText.value = media.description || ''
+  altEditDirty.value = false
+}
+
+function altGenerationFailureMessage(media: MediaAttachment) {
+  if (media.description_generation_error === 'rate_limited') {
+    return t('compose.alt_generation_rate_limited')
+  }
+  if (media.description_generation_error === 'rate_limiter_unavailable') {
+    return t('compose.alt_generation_unavailable')
+  }
+  return t('compose.alt_generation_failed')
+}
+
+function onAltInput() {
+  if (!altEditMedia.value || altEditDirty.value) return
+  altEditDirty.value = true
+  compose.markMediaDescriptionEdited(altEditMedia.value.id)
+}
+
+function closeAltEditor() {
+  if (altSaving.value) return
+  if (altEditMedia.value && altEditDirty.value) {
+    compose.resumeMediaDescriptionPolling(altEditMedia.value.id)
+  }
+  altEditMedia.value = null
+  altEditDirty.value = false
 }
 
 async function saveAlt() {
-  if (!altEditMedia.value || !auth.token) return
+  if (!altEditMedia.value || !auth.token || altSaving.value) return
+  const media = altEditMedia.value
+  const mediaId = media.id
+  altEditDirty.value = true
+  altSaving.value = true
+  compose.markMediaDescriptionEdited(mediaId)
   try {
-    // Update via API
-    const res = await fetch(`/api/v1/media/${altEditMedia.value.id}`, {
-      method: 'PUT',
-      headers: { 'Authorization': `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description: altEditText.value }),
-    })
-    if (res.ok) {
-      // Update local state
-      altEditMedia.value.description = altEditText.value
+    const { data } = await updateMedia(
+      mediaId,
+      { description: altEditText.value },
+      auth.token,
+    )
+    Object.assign(media, data)
+    compose.markMediaDescriptionReviewed(mediaId)
+    if (altEditMedia.value === media) {
+      altEditMedia.value = null
+      altEditDirty.value = false
     }
-  } catch { /* ignore */ }
-  altEditMedia.value = null
+  } catch {
+    // Keep the author's text available for a retry.
+  } finally {
+    altSaving.value = false
+  }
 }
+
+watch(
+  () => altEditMedia.value?.description,
+  (description) => {
+    if (!altEditDirty.value) altEditText.value = description || ''
+  },
+)
 
 /** Handle paste events — if clipboard contains images, upload them */
 async function onPaste(event: ClipboardEvent) {
@@ -480,7 +665,7 @@ async function onPaste(event: ClipboardEvent) {
       event.preventDefault()
       const file = item.getAsFile()
       if (file && compose.mediaAttachments.length < 4) {
-        await compose.addMedia(file)
+        await addComposerMedia(file)
       }
     }
   }
@@ -494,7 +679,7 @@ async function onDrop(event: DragEvent) {
   for (const file of Array.from(files)) {
     if (compose.mediaAttachments.length >= 4) break
     if (file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/')) {
-      await compose.addMedia(file)
+      await addComposerMedia(file)
     }
   }
 }
@@ -503,6 +688,9 @@ function submit() {
   if (!canSubmit.value) return
   emit('submit', {
     content: content.value,
+    object_type: objectType.value,
+    title: objectType.value === 'Article' ? articleTitle.value.trim() : undefined,
+    summary: objectType.value === 'Article' ? articleSummary.value.trim() : undefined,
     spoiler_text: showCw.value ? spoilerText.value : '',
     visibility: selectedVisibility.value.value,
     language: selectedLanguage.value.code,
@@ -511,7 +699,11 @@ function submit() {
     quote_policy: compose.quotePolicy,
     media_ids: compose.mediaAttachments.map(m => m.id),
   })
+  generatedArticleMediaMarkdown.clear()
   content.value = ''
+  objectType.value = 'Note'
+  articleTitle.value = ''
+  articleSummary.value = ''
   spoilerText.value = ''
   showCw.value = false
   compose.mediaAttachments.splice(0)
@@ -658,6 +850,24 @@ function submit() {
       {{ t('compose.replying_to', { name: `@${replyTo.account.acct}` }) }}
     </div>
 
+    <div v-if="objectType === 'Article'" class="mb-2">
+      <input
+        v-model="articleTitle"
+        type="text"
+        maxlength="200"
+        :placeholder="t('compose.article_title_placeholder')"
+        class="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-xl font-bold text-gray-950 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-700 dark:text-white dark:placeholder-gray-500"
+      />
+      <div class="mt-1 text-right text-xs text-gray-400">{{ articleTitle.length }}/200</div>
+      <textarea
+        v-model="articleSummary"
+        maxlength="500"
+        rows="2"
+        :placeholder="t('compose.article_summary_placeholder')"
+        class="mt-2 w-full resize-y rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-700 dark:text-gray-100 dark:placeholder-gray-500"
+      />
+    </div>
+
     <!-- CW input -->
     <input
       v-if="showCw"
@@ -734,9 +944,31 @@ function submit() {
           type="button"
           @click="openAltEditor(media)"
           class="absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[10px] font-bold transition-opacity"
-          :class="media.description ? 'bg-indigo-500 text-white opacity-90' : 'bg-black/60 text-white opacity-0 group-hover:opacity-100'"
+          :class="media.description_generation_status === 'pending'
+            ? 'bg-black/75 text-white opacity-100'
+            : media.description_generation_status === 'failed'
+              ? 'bg-red-600 text-white opacity-100'
+            : media.description
+              ? 'bg-indigo-500 text-white opacity-90'
+              : 'bg-black/60 text-white opacity-0 group-hover:opacity-100'"
+          :aria-live="media.description_generation_status === 'pending' || media.description_generation_status === 'failed' ? 'polite' : undefined"
+          data-testid="media-alt-button"
         >
-          ALT
+          <span
+            v-if="media.description_generation_status === 'pending'"
+            class="inline-flex items-center gap-1"
+            data-testid="media-alt-generating"
+          >
+            <span class="h-2 w-2 animate-spin rounded-full border border-white/50 border-t-white" />
+            {{ t('compose.alt_generating') }}
+          </span>
+          <span
+            v-else-if="media.description_generation_status === 'failed'"
+            data-testid="media-alt-failed"
+          >
+            ! {{ t('compose.alt_generation_failed_short') }}
+          </span>
+          <template v-else>ALT</template>
         </button>
         <!-- Remove button -->
         <button
@@ -749,6 +981,14 @@ function submit() {
         </button>
       </div>
     </div>
+
+    <p
+      v-if="compose.hasUnreviewedGeneratedAltText"
+      class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400"
+      data-testid="generated-alt-notice"
+    >
+      {{ t('compose.alt_generated_notice') }}
+    </p>
 
     <!-- Quote preview -->
     <div
@@ -777,19 +1017,29 @@ function submit() {
     </div>
 
     <!-- ALT text editor modal -->
-    <div v-if="altEditMedia" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" @click.self="altEditMedia = null">
-      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md mx-4 p-4">
+    <div v-if="altEditMedia" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" @click.self="closeAltEditor">
+      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md mx-4 p-4" :aria-busy="altSaving">
         <div class="flex items-center justify-between mb-3">
           <h3 class="font-bold text-sm">{{ t('compose.alt_text') }}</h3>
-          <button type="button" @click="altEditMedia = null" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">✕</button>
+          <button type="button" @click="closeAltEditor" :disabled="altSaving" data-testid="media-alt-close" class="text-gray-400 hover:text-gray-600 disabled:cursor-wait disabled:opacity-50 dark:hover:text-gray-300">✕</button>
         </div>
         <img
           v-if="altEditMedia.type === 'image' || altEditMedia.type === 'gifv'"
           :src="altEditMedia.preview_url ?? altEditMedia.url"
           class="w-full h-40 object-contain rounded-lg bg-gray-100 dark:bg-gray-900 mb-3"
         />
+        <p
+          v-if="altEditMedia.description_generation_status === 'failed'"
+          class="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-300"
+          role="alert"
+          data-testid="media-alt-failure-message"
+        >
+          {{ altGenerationFailureMessage(altEditMedia) }}
+        </p>
         <textarea
           v-model="altEditText"
+          @input="onAltInput"
+          :disabled="altSaving"
           :placeholder="t('compose.alt_placeholder')"
           rows="3"
           class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -800,7 +1050,8 @@ function submit() {
           <button
             type="button"
             @click="saveAlt"
-            class="px-4 py-1.5 text-sm font-medium bg-indigo-500 text-white rounded-lg hover:bg-indigo-600"
+            :disabled="altSaving"
+            class="px-4 py-1.5 text-sm font-medium bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:cursor-wait disabled:opacity-60"
           >
             {{ t('common.save') }}
           </button>
@@ -899,7 +1150,7 @@ function submit() {
         <button
           type="button"
           @click="togglePoll"
-          :disabled="compose.mediaAttachments.length > 0"
+          :disabled="compose.mediaAttachments.length > 0 || objectType === 'Article'"
           class="p-2 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           :class="compose.showPoll ? 'bg-indigo-600 text-white' : 'text-indigo-600 dark:text-indigo-300 hover:bg-gray-100 dark:hover:bg-gray-800'"
           :aria-label="t('compose.poll_toggle')"
@@ -907,6 +1158,18 @@ function submit() {
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M4 19V9m5 10V5m5 14v-7m5 7V8" /></svg>
         </button>
+
+        <!-- Article toggle -->
+        <button
+          type="button"
+          @click="toggleArticle"
+          class="rounded-lg px-2.5 py-2 text-sm font-bold transition-colors"
+          :class="objectType === 'Article'
+            ? 'bg-indigo-600 text-white'
+            : 'text-indigo-600 hover:bg-gray-100 dark:text-indigo-300 dark:hover:bg-gray-800'"
+          :aria-label="t('compose.article_toggle')"
+          :title="t('compose.article_toggle')"
+        >A</button>
 
         <!-- Emoji picker -->
         <div class="relative" ref="emojiPickerRef">

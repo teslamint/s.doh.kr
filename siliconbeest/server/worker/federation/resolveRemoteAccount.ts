@@ -19,6 +19,7 @@ import { pickSignerUsername } from '../../../../packages/shared/services/signer'
 import { emojiTagToCustomEmoji } from '../../../../packages/shared/utils/customEmoji';
 import { getSuspendedDomains } from '../../../../packages/shared/domain-blocks';
 import { canStoreFetchedRemoteActor } from '../../../../packages/shared/permissions';
+import type { DocumentLoader } from '@fedify/vocab-runtime';
 
 /**
  * Resolve or upsert a remote ActivityPub account.
@@ -31,6 +32,7 @@ import { canStoreFetchedRemoteActor } from '../../../../packages/shared/permissi
 export async function resolveRemoteAccount(
 	actorUri: string,
 	signerAccountId: string | null = null,
+	documentLoader?: DocumentLoader,
 ): Promise<string | null> {
 	// URI hosts are case-insensitive (DNS): normalize through the WHATWG URL
 	// parser (lowercases scheme+host, preserves path case) so the dedup lookup
@@ -112,8 +114,22 @@ export async function resolveRemoteAccount(
 			console.warn(`[resolveRemoteAccount] No local signer available for ${actorUri}, skipping`);
 			return null;
 		}
-		const docLoader = await ctx.getDocumentLoader({ identifier: signerUsername });
-		const actorObj = await ctx.lookupObject(actorUri, { documentLoader: docLoader });
+		let docLoader = documentLoader;
+		if (!docLoader) {
+			try {
+				docLoader = await ctx.getDocumentLoader({ identifier: signerUsername });
+			} catch (err) {
+				// In the queue consumer the worker-module Federation singleton has
+				// no key pairs dispatcher registered, so a signed loader is
+				// unavailable there. An unauthenticated fetch still resolves actors
+				// on almost every implementation and beats dropping the activity.
+				console.warn(`[resolveRemoteAccount] Signed document loader unavailable for ${actorUri}, falling back to unauthenticated fetch: ${err}`);
+			}
+		}
+		const actorObj = await ctx.lookupObject(
+			actorUri,
+			docLoader ? { documentLoader: docLoader } : {},
+		);
 		if (actorObj && isActor(actorObj) && actorObj.id && canStoreFetchedRemoteActor({
 			requestedActorUri: lookupUri,
 			actorUri: actorObj.id.href,
@@ -122,7 +138,9 @@ export async function resolveRemoteAccount(
 		})) {
 			resolved = true;
 			canonicalUri = actorObj.id.href;
-			username = (actorObj.preferredUsername ?? '') as string;
+			// preferredUsername can be a Fedify LanguageString (typeof 'object',
+			// e.g. Akkoma actors) — D1 rejects object binds, so coerce.
+			username = actorObj.preferredUsername?.toString() ?? '';
 			displayName = (actorObj.name?.toString() ?? '') as string;
 			summary = sanitizeHtml(actorObj.summary?.toString() ?? '');
 			actorUrl = String(actorObj.url ?? actorUri);

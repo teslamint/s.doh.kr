@@ -121,12 +121,12 @@ async function main() {
     privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
   });
 
-  // Ed25519 keypair — the app expects base64url, NOT PEM: raw 32-byte public
-  // key and PKCS8 DER private key (see importEd25519PublicKey/PrivateKey)
+  // Ed25519 keypair — stored base64url (raw public / PKCS8 private) to match
+  // the worker's importEd25519PublicKey/PrivateKey format. PEM here breaks
+  // atob() in the keypair dispatcher.
   const ed = crypto.generateKeyPairSync('ed25519');
-  const b64url = (buf) => buf.toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+\$/, '');
-  const edPublicKey  = b64url(ed.publicKey.export({ type: 'spki', format: 'der' }).subarray(-32));
-  const edPrivateKey = b64url(ed.privateKey.export({ type: 'pkcs8', format: 'der' }));
+  const ed25519PublicKey = ed.publicKey.export({ format: 'jwk' }).x;
+  const ed25519PrivateKey = ed.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64url');
 
   const keyIdUri = actorUri + '#main-key';
 
@@ -136,8 +136,8 @@ async function main() {
     passwordHash,
     actorUri, actorUrl,
     publicKey, privateKey,
-    ed25519PublicKey: edPublicKey,
-    ed25519PrivateKey: edPrivateKey,
+    ed25519PublicKey,
+    ed25519PrivateKey,
     keyIdUri
   };
 

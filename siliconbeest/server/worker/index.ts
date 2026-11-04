@@ -12,6 +12,7 @@ import { federation } from '@fedify/hono';
 
 import type { AppVariables } from './types';
 import { corsMiddleware } from './middleware/cors';
+import { debugLogMiddleware } from './middleware/debugLog';
 import { requestIdMiddleware } from './middleware/requestId';
 import { contentNegotiation } from './middleware/contentNegotiation';
 import { errorHandler } from './middleware/errorHandler';
@@ -85,6 +86,8 @@ import endorsements from './endpoints/api/v1/endorsements';
 import setup from './endpoints/api/v1/setup';
 import registration from './endpoints/api/v1/registration';
 import invites from './endpoints/api/v1/invites';
+import drafts from './endpoints/api/v1/drafts';
+import ads from './endpoints/api/v1/ads';
 
 // -- Auth --
 import passwords from './endpoints/api/v1/auth/passwords';
@@ -142,6 +145,7 @@ const app = new Hono<{ Variables: AppVariables }>();
 
 app.onError(errorHandler);
 app.use('*', requestIdMiddleware);
+app.use('*', debugLogMiddleware);
 app.use('*', corsMiddleware);
 app.use('*', contentNegotiation);
 app.use('*', logger());
@@ -299,6 +303,8 @@ app.route('/api/v1/mutes', mutes);
 app.route('/api/v1/preferences', preferences);
 app.route('/api/v1/custom_emojis', customEmojis);
 app.route('/api/v1/markers', markers);
+app.route('/api/v1/drafts', drafts);
+app.route('/api/v1/ads', ads);
 
 app.route('/api/v1/statuses', statuses);
 app.route('/api/v1/streaming', streaming);
@@ -371,6 +377,17 @@ app.get('/users/:identifier/statuses/:id', async (c, next) => {
   return c.redirect(`https://${env.INSTANCE_DOMAIN}/@${c.req.param('identifier')}/${c.req.param('id')}`);
 });
 
+// Activity wrapper for statuses (Create/Announce) — register this concrete
+// route before the generic status collection route so "activity" is not
+// consumed as an unsupported :collection value.
+app.get('/users/:identifier/statuses/:id/activity', async (c) => {
+  const accept = c.req.header('Accept') || '';
+  if (!accept.includes('activity+json') && !accept.includes('ld+json')) {
+    return c.redirect(`https://${env.INSTANCE_DOMAIN}/@${c.req.param('identifier')}/${c.req.param('id')}`);
+  }
+  return handleActivityRequest(c.req.param('identifier'), c.req.param('id'));
+});
+
 app.get('/users/:identifier/statuses/:id/:collection', async (c) => {
   const collection = c.req.param('collection');
   if (collection !== 'replies' && collection !== 'shares' && collection !== 'likes') {
@@ -392,16 +409,6 @@ app.get('/users/:identifier/statuses/:id/:collection', async (c) => {
 
 app.route('/users', apActor);
 app.route('/actor', apInstanceActor);
-
-// Activity wrapper for statuses (Create/Announce) — Hono route because
-// Fedify only allows one type per path pattern
-app.get('/users/:identifier/statuses/:id/activity', async (c) => {
-  const accept = c.req.header('Accept') || '';
-  if (!accept.includes('activity+json') && !accept.includes('ld+json')) {
-    return c.redirect(`https://${env.INSTANCE_DOMAIN}/@${c.req.param('identifier')}/${c.req.param('id')}`);
-  }
-  return handleActivityRequest(c.req.param('identifier'), c.req.param('id'));
-});
 
 // ---------------------------------------------------------------------------
 // Media serving (R2)

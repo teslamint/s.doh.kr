@@ -8,6 +8,7 @@ import { resolveRemoteAccount } from '../../../../federation/resolveRemoteAccoun
 import { getFedifyContext, sendToFollowers, sendToRecipient } from '../../../../federation/helpers/send';
 import {
   Create,
+  Article,
   Note,
   Question,
   Mention,
@@ -15,11 +16,13 @@ import {
   Image,
   Document as APDocument,
   Source,
+  LanguageString,
   Emoji as APEmoji,
   QuoteRequest,
 } from '@fedify/vocab';
 import { Temporal } from '@js-temporal/polyfill';
 import { generateUlid } from '../../../../utils/ulid';
+import { buildArticlePreviewContent } from '../../../../utils/contentParser';
 import type { StatusWithJoinedAccountRow, MediaAttachmentRow } from '../../../../types/db';
 import { createStatus } from '../../../../services/status';
 import { createLocalQuoteAuthorization } from '../../../../federation/helpers/quote';
@@ -31,6 +34,8 @@ import {
   type StatusVisibility,
 } from '../../../../../../../packages/shared/permissions';
 import { canSurfaceStatusToViewer } from '../../../../services/permissions';
+import { recordRecommendationActivity } from '../../../../services/recommendationActivity';
+import { scheduleBackgroundTask } from '../../../../utils/backgroundTask';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -43,6 +48,9 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
 
   let body: {
     status?: string;
+    object_type?: string;
+    title?: string;
+    summary?: string;
     media_ids?: string[];
     poll?: { options: string[]; expires_in: number; multiple?: boolean };
     in_reply_to_id?: string;
@@ -63,6 +71,10 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
 
   const statusText = (body.status || '').trim();
   const mediaIds = body.media_ids || [];
+  if (body.object_type !== undefined && body.object_type !== 'Note' && body.object_type !== 'Article') {
+    throw new AppError(422, 'Validation failed', 'Invalid object type');
+  }
+  const objectType = body.object_type === 'Article' ? 'Article' : 'Note';
 
   if (!statusText && mediaIds.length === 0) {
     throw new AppError(422, 'Validation failed', 'Status text or media is required');
@@ -82,9 +94,11 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
   // ============================================================
   const result = await createStatus(domain, currentUser.account_id, currentAccount.username, {
     text: statusText,
+    objectType,
+    title: body.title,
     visibility: requestedVisibility,
     sensitive: body.sensitive,
-    spoilerText: body.spoiler_text,
+    spoilerText: objectType === 'Article' ? (body.summary ?? body.spoiler_text) : body.spoiler_text,
     inReplyToId: body.in_reply_to_id,
     mediaIds,
     language: body.language,
@@ -96,7 +110,7 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
   });
 
   const {
-    statusId, statusUri, statusUrl, content, parsed,
+    statusId, statusUri, statusUrl, objectType: storedObjectType, title, content, parsed,
     localMentions, hashtags, emojiTags: resolvedEmojiTags,
     pollData, conversationApUri,
     inReplyToId, inReplyToAccountId,
@@ -108,6 +122,18 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     visibility, sensitive, spoilerText, language,
   } = result;
   const now = new Date().toISOString();
+  if (visibility === 'public') {
+    await scheduleBackgroundTask(
+      () => c.executionCtx,
+      recordRecommendationActivity(currentUser.account_id, 'posted', statusId, now),
+      {
+        operation: 'record_recommendation_activity',
+        activityKind: 'posted',
+        accountId: currentUser.account_id,
+        statusId,
+      },
+    );
+  }
   let quoteAuthorizationUri = initialQuoteAuthorizationUri;
   let quoteApprovalStatus = initialQuoteApprovalStatus;
 
@@ -391,8 +417,12 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
         });
         const dmAcct = dmRow.a_domain ? `${dmRow.a_username}@${dmRow.a_domain}` : dmRow.a_username;
         const dmPayload = JSON.stringify({
-          id: statusId, uri: statusUri, created_at: now, content: fixedContent, visibility,
-          sensitive: !!sensitive, spoiler_text: spoilerText, language, url: statusUrl,
+          id: statusId, uri: statusUri, object_type: pollData ? 'Question' : storedObjectType, title,
+          created_at: now, content: fixedContent, visibility,
+          article_summary: storedObjectType === 'Article' ? spoilerText : '',
+          sensitive: !!sensitive,
+          spoiler_text: storedObjectType === 'Article' ? '' : spoilerText,
+          language, url: statusUrl,
           in_reply_to_id: inReplyToId, in_reply_to_account_id: inReplyToAccountId,
           reblogs_count: dmRow.reblogs_count || 0, favourites_count: dmRow.favourites_count || 0,
           replies_count: dmRow.replies_count || 0, edited_at: dmRow.edited_at || null,
@@ -563,7 +593,7 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     if (statusText) {
       noteValues.source = new Source({
         content: statusText,
-        mediaType: 'text/plain',
+        mediaType: storedObjectType === 'Article' ? 'text/markdown' : 'text/plain',
       });
     }
 
@@ -585,7 +615,7 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     }
 
     // Build Note or Question depending on whether this is a poll
-    let fedifyObject: Note | Question;
+    let fedifyObject: Note | Article | Question;
 
     if (pollData) {
       const options: Array<{ title: string; votes_count: number }> = JSON.parse(
@@ -610,6 +640,24 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
 
       questionValues.voters = 0;
       fedifyObject = new Question(questionValues);
+    } else if (storedObjectType === 'Article') {
+      const { content: _content, summary: _summary, ...articleValues } = noteValues;
+      fedifyObject = new Article({
+        ...articleValues,
+        contents: [fixedContent, new LanguageString(fixedContent, language)],
+        names: [title, new LanguageString(title, language)],
+        ...(spoilerText
+          ? { summaries: [spoilerText, new LanguageString(spoilerText, language)] }
+          : {}),
+        mediaType: 'text/html',
+        preview: new Note({
+          attribution: new URL(actorUri),
+          content: buildArticlePreviewContent(title, spoilerText),
+          published: Temporal.Instant.from(now),
+          ...(allTags.length > 0 ? { tags: allTags } : {}),
+          ...(mediaAttachmentObjects.length > 0 ? { attachments: mediaAttachmentObjects } : {}),
+        }),
+      } as ConstructorParameters<typeof Article>[0]);
     } else {
       fedifyObject = new Note(noteValues);
     }
@@ -753,11 +801,14 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
         : (quotedRow.account_username as string);
       quoteStatus = {
         id: quotedRow.id as string,
+        object_type: quotedRow.poll_id ? 'Question' : quotedRow.object_type === 'Article' ? 'Article' : 'Note',
+        title: (quotedRow.title as string) || '',
+        article_summary: quotedRow.object_type === 'Article' ? (quotedRow.content_warning as string) || '' : '',
         created_at: quotedRow.created_at as string,
         in_reply_to_id: (quotedRow.in_reply_to_id as string) || null,
         in_reply_to_account_id: (quotedRow.in_reply_to_account_id as string) || null,
         sensitive: !!(quotedRow.sensitive),
-        spoiler_text: (quotedRow.content_warning as string) || '',
+        spoiler_text: quotedRow.object_type === 'Article' ? '' : (quotedRow.content_warning as string) || '',
         visibility: (quotedRow.visibility as string) || 'public',
         language: (quotedRow.language as string) || 'en',
         uri: quotedRow.uri as string,
@@ -811,11 +862,14 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
 
   return c.json({
     id: statusId,
+    object_type: pollData ? 'Question' : storedObjectType,
+    title,
+    article_summary: storedObjectType === 'Article' ? spoilerText : '',
     created_at: now,
     in_reply_to_id: inReplyToId,
     in_reply_to_account_id: inReplyToAccountId,
     sensitive: !!sensitive,
-    spoiler_text: spoilerText,
+    spoiler_text: storedObjectType === 'Article' ? '' : spoilerText,
     visibility,
     language,
     uri: statusUri,

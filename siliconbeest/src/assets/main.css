@@ -123,6 +123,10 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  .ellipsis::after {
+    content: '\2026';
+  }
 }
 
 @layer components {
@@ -180,6 +184,35 @@
 
   .status-content p:last-child {
     margin-bottom: 0;
+  }
+
+  /* Federated content can include syntax-highlighted code where each line is
+     wrapped in spans. Keep those intrinsic widths from stretching the status
+     card, and let wide blocks scroll on their own instead. */
+  .status-content,
+  .status-content .prose {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .status-content .prose > * {
+    max-width: 100%;
+  }
+
+  .status-content pre,
+  .status-content blockquote,
+  .status-content ul,
+  .status-content ol {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .status-content img,
+  .status-content video,
+  .status-content audio {
+    max-width: 100%;
   }
 
   .status-content a {

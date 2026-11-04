@@ -10,10 +10,26 @@
 # =============================================================================
 
 # ---------------------------------------------------------------------------
+# Instance overrides (config.env) — must load BEFORE the derived names below:
+# CI writes PROJECT_PREFIX there from GitHub Variables, and every
+# ${PROJECT_PREFIX}-* default is frozen at the moment it is evaluated.
+# ---------------------------------------------------------------------------
+_CONFIG_ENV_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config.env"
+[[ -f "$_CONFIG_ENV_FILE" ]] && source "$_CONFIG_ENV_FILE"
+
+# ---------------------------------------------------------------------------
 # Project prefix — used as default for all resource names below
 # Change this to rename everything at once (e.g. "myinstance")
 # ---------------------------------------------------------------------------
 PROJECT_PREFIX="${PROJECT_PREFIX:-siliconbeest}"
+# Cloudflare worker, queue, and R2 names must be lowercase (alphanumeric and
+# dashes). Normalize so a mixed-case prefix — e.g. a GitHub Variable set to
+# "SiliconBeest" — resolves to the lowercase names wrangler accepts.
+PROJECT_PREFIX=$(printf '%s' "$PROJECT_PREFIX" | tr '[:upper:]' '[:lower:]')
+if [[ ! "$PROJECT_PREFIX" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+  echo "[ERROR] PROJECT_PREFIX must contain only letters, numbers, and dashes, got: $PROJECT_PREFIX" >&2
+  exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Cloudflare Worker names (used by wrangler deploy --name)
@@ -74,23 +90,9 @@ read_wrangler_json() {
   node -e "
 const fs = require('fs');
 const content = fs.readFileSync('$FILE', 'utf8');
-// Strip JSONC comments without touching string contents (URLs contain '//')
-let cleaned = '', inStr = false, inLine = false, inBlock = false;
-for (let i = 0; i < content.length; i++) {
-  const c = content[i], n = content[i + 1];
-  if (inLine) { if (c === '\n') { inLine = false; cleaned += c; } continue; }
-  if (inBlock) { if (c === '*' && n === '/') { inBlock = false; i++; } continue; }
-  if (inStr) {
-    cleaned += c;
-    if (c === '\\\\') { cleaned += n; i++; }
-    else if (c === '\"') { inStr = false; }
-    continue;
-  }
-  if (c === '\"') { inStr = true; cleaned += c; continue; }
-  if (c === '/' && n === '/') { inLine = true; continue; }
-  if (c === '/' && n === '*') { inBlock = true; i++; continue; }
-  cleaned += c;
-}
+// Strip full-line comments only: a trailing-comment regex would also eat
+// the slashes inside string values like the REPOSITORY_URL https URL.
+const cleaned = content.replace(/^[ \t]*\/\/.*$/gm, '');
 try {
   const config = JSON.parse(cleaned);
   const result = $EXPR;

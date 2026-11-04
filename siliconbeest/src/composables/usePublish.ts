@@ -3,11 +3,15 @@ import { useComposeStore } from '@/stores/compose';
 import { useStatusesStore } from '@/stores/statuses';
 import { useTimelinesStore } from '@/stores/timelines';
 import { useUiStore } from '@/stores/ui';
+import { useDraftsStore } from '@/stores/drafts';
 import { playComposeSound } from '@/utils/newPostSound';
 import type { StatusVisibility, QuotePolicy } from '@/types/mastodon';
 
 export interface PublishPayload {
   content: string;
+  object_type?: 'Note' | 'Article';
+  title?: string;
+  summary?: string;
   visibility?: string;
   sensitive?: boolean;
   spoiler_text?: string;
@@ -16,6 +20,7 @@ export interface PublishPayload {
   quote_id?: string;
   quote_policy?: QuotePolicy;
   media_ids?: string[];
+  draft_id?: string;
 }
 
 /**
@@ -32,6 +37,7 @@ export function usePublish() {
   const statusesStore = useStatusesStore();
   const timelinesStore = useTimelinesStore();
   const ui = useUiStore();
+  const drafts = useDraftsStore();
 
   const VISIBILITY_RANK: Record<string, number> = {
     direct: 0,
@@ -49,8 +55,12 @@ export function usePublish() {
 
   async function publish(payload: PublishPayload) {
     if (!auth.token) return;
+    const isEditing = compose.editingId !== null;
 
     compose.text = payload.content;
+    compose.objectType = payload.object_type ?? 'Note';
+    compose.title = payload.title ?? '';
+    compose.articleSummary = payload.summary ?? '';
 
     // Determine visibility: if replying, clamp to parent visibility
     if (payload.in_reply_to_id) {
@@ -62,11 +72,9 @@ export function usePublish() {
       compose.visibility = payload.visibility as StatusVisibility;
     }
 
-    if (payload.sensitive) compose.sensitive = payload.sensitive;
-    if (payload.spoiler_text) {
-      compose.contentWarning = payload.spoiler_text;
-      compose.showContentWarning = true;
-    }
+    if (payload.sensitive !== undefined) compose.sensitive = payload.sensitive;
+    compose.contentWarning = payload.spoiler_text ?? '';
+    compose.showContentWarning = Boolean(payload.spoiler_text);
     if (payload.language) compose.language = payload.language;
     if (payload.in_reply_to_id) compose.inReplyToId = payload.in_reply_to_id;
     if (payload.quote_id) compose.quoteId = payload.quote_id;
@@ -77,17 +85,22 @@ export function usePublish() {
 
     const status = await compose.publish();
     if (status) {
-      statusesStore.cacheStatus(status);
-      timelinesStore.prependStatus('home', status.id);
-      if (timelinesStore.timelines.has('social')) {
-        timelinesStore.prependStatus('social', status.id);
+      if (!isEditing && payload.draft_id) {
+        void drafts.remove(payload.draft_id);
       }
-      if (status.visibility === 'public') {
-        timelinesStore.prependStatus('public', status.id);
-        timelinesStore.prependStatus('local', status.id);
+      statusesStore.cacheStatus(status);
+      if (!isEditing) {
+        timelinesStore.prependStatus('home', status.id);
+        if (timelinesStore.timelines.has('social')) {
+          timelinesStore.prependStatus('social', status.id);
+        }
+        if (status.visibility === 'public') {
+          timelinesStore.prependStatus('public', status.id);
+          timelinesStore.prependStatus('local', status.id);
+        }
+        playComposeSound();
       }
       ui.closeComposeModal();
-      playComposeSound();
     }
     return status;
   }

@@ -10,7 +10,9 @@ const AUTH_TOKEN_COOKIE = 'siliconbeest_token';
 
 const AUTH_ONLY_PREFIXES = [
   '/home',
+  '/recommended',
   '/timelines/home',
+  '/timelines/recommended',
   '/timelines/social',
   '/notifications',
   '/conversations',
@@ -22,6 +24,7 @@ const AUTH_ONLY_PREFIXES = [
   '/settings',
   '/invitations',
   '/admin',
+  '/share',
 ];
 
 const GUEST_ONLY_PATHS = new Set(['/', '/login', '/register', '/auth/registration']);

@@ -3,9 +3,19 @@ import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { authRequired, adminOnlyRequired as adminRequired } from '../../../../middleware/auth';
 import { requireScopeForMethod } from '../../../../middleware/scopeCheck';
-import { getAllSettings, setSettings } from '../../../../services/instance';
+import {
+	getAllSettings,
+	getInstanceLanguages,
+	parseInstanceLanguagesSetting,
+	setInstanceLanguages,
+	setSettings,
+} from '../../../../services/instance';
 import { CONTRIBUTION_EVENTS, contributionSettingKey } from '../../../../services/contribution';
 import { updateInvitationSettings } from '../../../../services/invitationCredits';
+import {
+	WORKERS_AI_FEATURE_SETTING_KEYS,
+	cacheWorkersAiFeatureFlags,
+} from '../../../../services/workersAiFeatures';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -18,7 +28,7 @@ app.use('*', requireScopeForMethod('admin:read', 'admin:write'));
  * GET /api/v1/admin/settings — get all instance settings.
  */
 app.get('/', async (c) => {
-	const settings = await getAllSettings();
+	const settings = await getAllSettingsWithInstanceLanguages();
 	return c.json(settings);
 });
 
@@ -26,7 +36,14 @@ app.get('/', async (c) => {
  * PATCH /api/v1/admin/settings — update settings (key-value pairs).
  */
 app.patch('/', async (c) => {
-	const body = await c.req.json<Record<string, string>>();
+	const rawBody = await c.req.json<Record<string, unknown>>();
+	// Settings are persisted as strings, but the admin UI's number inputs
+	// (and raw JSON clients) send integer settings as JSON numbers —
+	// stringify them so the per-key validators below see one canonical form.
+	const body = Object.fromEntries(Object.entries(rawBody).map(([key, value]) => [
+		key,
+		typeof value === 'number' ? String(value) : value,
+	])) as Record<string, string>;
 
 	// accent_color drives the Deck UI for every visitor — reject anything
 	// that is not a #rrggbb hex so a typo can't break the client-side parser.
@@ -42,7 +59,18 @@ app.patch('/', async (c) => {
 		&& body.require_email_verification !== '1') {
 		return c.json({ error: 'require_email_verification must be 0 or 1' }, 422);
 	}
+	const instanceLanguages = typeof body.instance_languages === 'string'
+		? parseInstanceLanguagesSetting(body.instance_languages)
+		: null;
+	if (body.instance_languages !== undefined && !instanceLanguages) {
+		return c.json({ error: 'instance_languages must be a comma-separated list of BCP 47 language tags' }, 422);
+	}
 	for (const key of ['invite_link_issuance_enabled', 'invite_contribution_enabled']) {
+		if (body[key] !== undefined && body[key] !== '0' && body[key] !== '1') {
+			return c.json({ error: `${key} must be 0 or 1` }, 422);
+		}
+	}
+	for (const key of Object.values(WORKERS_AI_FEATURE_SETTING_KEYS)) {
 		if (body[key] !== undefined && body[key] !== '0' && body[key] !== '1') {
 			return c.json({ error: `${key} must be 0 or 1` }, 422);
 		}
@@ -70,7 +98,8 @@ app.patch('/', async (c) => {
 		|| key.startsWith('invite_contribution_points_'),
 	));
 	const generalChanges = Object.fromEntries(Object.entries(body).filter(([key]) =>
-		!(key === 'invite_credit_max_per_account'
+		!(key === 'instance_languages'
+			|| key === 'invite_credit_max_per_account'
 			|| key === 'invite_link_issuance_enabled'
 			|| key === 'invite_contribution_enabled'
 			|| key === 'invite_contribution_threshold'
@@ -79,11 +108,23 @@ app.patch('/', async (c) => {
 	await setSettings(generalChanges);
 	const actor = c.get('currentAccount')!;
 	await updateInvitationSettings(actor.id, invitationChanges);
+	if (instanceLanguages) await setInstanceLanguages(instanceLanguages);
 
 	// Return the full settings after update
-	const settings = await getAllSettings();
+	const settings = await getAllSettingsWithInstanceLanguages(instanceLanguages ?? undefined);
+	if (Object.values(WORKERS_AI_FEATURE_SETTING_KEYS).some((key) => body[key] !== undefined)) {
+		await cacheWorkersAiFeatureFlags(settings);
+	}
 	return c.json(settings);
 });
+
+async function getAllSettingsWithInstanceLanguages(
+	languagesOverride?: readonly string[],
+): Promise<Record<string, string>> {
+	const settings = await getAllSettings();
+	const languages = languagesOverride ?? await getInstanceLanguages();
+	return { ...settings, instance_languages: languages.join(', ') };
+}
 
 function isSafeSettingInteger(value: string, minimum: number): boolean {
 	if (typeof value !== 'string' || !/^-?\d+$/.test(value)) return false;

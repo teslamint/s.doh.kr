@@ -162,13 +162,20 @@ export type StatusRow = {
   readonly id: string;
   readonly uri: string;
   readonly url: string | null;
+  /** ActivityStreams object type. Poll rows are serialized as Question. */
+  readonly object_type: 'Note' | 'Article';
+  /** ActivityStreams name, used as the title of an Article. */
+  readonly title: string;
+  readonly title_map: string | null;
   readonly account_id: string;
   readonly in_reply_to_id: string | null;
   readonly in_reply_to_account_id: string | null;
   readonly reblog_of_id: string | null;
   readonly text: string;
   readonly content: string;
+  readonly content_map: string | null;
   readonly content_warning: string;
+  readonly content_warning_map: string | null;
   readonly visibility: string;
   readonly sensitive: number;
   readonly language: string;
@@ -209,11 +216,30 @@ export type MediaAttachmentRow = {
   readonly file_size: number;
   readonly thumbnail_key: string | null;
   readonly remote_url: string | null;
-  readonly description: string;
+  /** NULL is used transiently while automatic ALT generation is pending. */
+  readonly description: string | null;
   readonly blurhash: string | null;
   readonly width: number | null;
   readonly height: number | null;
   readonly type: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+};
+
+export type AdvertisementFormat = 'text' | 'image' | 'text_image' | 'status';
+
+export type AdvertisementRow = {
+  readonly id: string;
+  readonly format: AdvertisementFormat;
+  readonly text: string | null;
+  readonly image_media_attachment_id: string | null;
+  readonly image_alt_text: string;
+  readonly status_id: string | null;
+  readonly link_url: string | null;
+  readonly enabled: number;
+  readonly starts_at: string | null;
+  readonly ends_at: string | null;
+  readonly created_by_account_id: string;
   readonly created_at: string;
   readonly updated_at: string;
 };
@@ -268,6 +294,15 @@ export type FavouriteRow = {
   readonly status_id: string;
   readonly uri: string | null;
   readonly created_at: string;
+};
+
+export type RecommendationActivityKind = 'posted' | 'reposted' | 'liked';
+
+export type RecommendationActivityRow = {
+  readonly account_id: string;
+  readonly activity_kind: RecommendationActivityKind;
+  readonly status_id: string;
+  readonly occurred_at: string;
 };
 
 export type BlockRow = {
@@ -653,6 +688,8 @@ export type StatusWithJoinedAccountRow = StatusRow & {
 
 /** Result of `SELECT content, spoiler_text, sensitive, created_at, ... FROM status_edits` */
 export type StatusEditRow = {
+  readonly object_type: 'Note' | 'Article';
+  readonly title: string;
   readonly content: string;
   readonly spoiler_text: string;
   readonly sensitive: number;
