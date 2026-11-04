@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useNotificationsStore } from '@/stores/notifications'
 import { useAnnouncementsStore } from '@/stores/announcements'
 import { useDeckColumns } from '../composables/useDeckColumns'
+import { useRecommendedTimelineFeature } from '@/composables/useRecommendedTimelineFeature'
 import type { ColumnType } from '@/stores/ui'
 import Avatar from '@/components/common/Avatar.vue'
 
@@ -19,13 +20,16 @@ const router = useRouter()
 const auth = useAuthStore()
 const notifStore = useNotificationsStore()
 const announcementsStore = useAnnouncementsStore()
+const { available: recommendedAvailable } = useRecommendedTimelineFeature()
 
 // Same-origin: the worker always serves /thumbnail.png (SVG fallback inside)
 const instanceIcon = '/thumbnail.png'
 const { columns, configRows, isEnabled, toggle, move, reorder } = useDeckColumns()
 
-// Short labels — the rail buttons are 58px wide, long labels overflow
+// Labels remain compact, but the desktop rail is wide enough to place them
+// beside their icons (Misskey-style) instead of stacking them vertically.
 const COLUMN_META: Record<ColumnType, { emoji: string; labelKey: string }> = {
+  recommended: { emoji: '✨', labelKey: 'timeline.ai_recommended_nav' },
   home: { emoji: '🏠', labelKey: 'deck.nav_home' },
   social: { emoji: '🫂', labelKey: 'deck.nav_social' },
   local: { emoji: '🦬', labelKey: 'deck.nav_local' },
@@ -36,12 +40,21 @@ const COLUMN_META: Record<ColumnType, { emoji: string; labelKey: string }> = {
 }
 
 // Single-timeline navigation entries (after the Deck entry)
-const timelineEntries: { type: 'home' | 'social' | 'local' | 'federated'; emoji: string; labelKey: string }[] = [
+type DeckTimelineNavType = 'home' | 'recommended' | 'social' | 'local' | 'federated'
+
+const timelineEntries = computed<Array<{
+  type: DeckTimelineNavType
+  emoji: string
+  labelKey: string
+}>>(() => [
+  ...(recommendedAvailable.value
+    ? [{ type: 'recommended' as const, emoji: '✨', labelKey: 'timeline.ai_recommended_nav' }]
+    : []),
   { type: 'home', emoji: '🏠', labelKey: 'deck.nav_home' },
   { type: 'local', emoji: '🦬', labelKey: 'deck.nav_local' },
   { type: 'social', emoji: '🫂', labelKey: 'deck.nav_social' },
   { type: 'federated', emoji: '📡', labelKey: 'deck.nav_federated' },
-]
+])
 
 const onDeck = computed(() => route.name === 'home')
 
@@ -55,6 +68,7 @@ const unreadBadge = computed(() => {
 })
 
 const announcementBadge = computed(() => {
+  if (!auth.isAuthenticated) return ''
   const count = announcementsStore.unreadCount
   return count > 99 ? '99+' : count > 0 ? String(count) : ''
 })
@@ -130,14 +144,14 @@ function isRouteActive(path: string): boolean {
 
 <template>
   <nav
-    class="dk-hairline-r min-h-0 w-[78px] flex-none flex-col items-center gap-1.5 px-2.5 py-3.5"
+    class="dk-side-rail dk-hairline-r min-h-0 w-[156px] flex-none flex-col items-stretch gap-1 px-2 py-2.5"
     :class="showColumnConfig || showMore || showAccount
       ? 'overflow-visible'
       : 'overflow-x-hidden overflow-y-auto overscroll-y-contain'"
     :aria-label="t('nav.main_navigation')"
   >
     <!-- Deck (multi-column) + column configuration -->
-    <div class="relative flex flex-col items-center">
+    <div class="relative flex w-full flex-col items-stretch">
       <router-link
         to="/home"
         class="dk-rail-item no-underline"
@@ -223,10 +237,10 @@ function isRouteActive(path: string): boolean {
       </div>
     </div>
 
-    <div class="dk-hairline-b my-1 w-10" aria-hidden="true" />
+    <div class="dk-hairline-b my-1 w-full" aria-hidden="true" />
     <span class="dk-rail-caption" aria-hidden="true">{{ t('deck.section_timelines') }}</span>
 
-    <!-- Single timelines: Home | Local | Social | Federated -->
+    <!-- Single timelines: Home | AI recommendations | Local | Social | Federated -->
     <router-link
       v-for="entry in timelineEntries"
       :key="entry.type"
@@ -235,6 +249,7 @@ function isRouteActive(path: string): boolean {
       :class="{ 'dk-rail-item-active': isTimelineActive(entry.type) }"
       :title="t(entry.labelKey)"
       :aria-label="t(entry.labelKey)"
+      :data-recommended-nav="entry.type === 'recommended' ? '' : undefined"
     >
       <img
         v-if="entry.type === 'local'"
@@ -247,7 +262,7 @@ function isRouteActive(path: string): boolean {
       <span class="dk-rail-label">{{ t(entry.labelKey) }}</span>
     </router-link>
 
-    <div class="dk-hairline-b my-1 w-10" aria-hidden="true" />
+    <div class="dk-hairline-b my-1 w-full" aria-hidden="true" />
 
     <!-- Announcements -->
     <router-link
@@ -290,7 +305,7 @@ function isRouteActive(path: string): boolean {
     </router-link>
 
     <!-- More menu -->
-    <div class="relative">
+    <div class="relative w-full">
       <button
         type="button"
         class="dk-rail-item"

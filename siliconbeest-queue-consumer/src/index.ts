@@ -18,11 +18,17 @@
  */
 
 import { env } from 'cloudflare:workers';
+import * as Sentry from '@sentry/cloudflare';
 import type { QueueMessage } from './shared/types/queue';
 import { createFed } from './fedify';
+import { createFed as createWorkerModuleFed } from '../../siliconbeest/server/worker/federation/fedify';
 import { setupActorDispatcher } from './dispatchers';
 import { WorkersMessageQueue } from '@fedify/cfworkers';
 import { measureAsync, logPerformance } from './observability/performance';
+import { debugLog } from '../../packages/shared/utils/debugLog';
+import { ensureFedifyDebugLogging } from './utils/debugLogtape';
+import { ensureDebugSentryLogging } from './utils/debugSentry';
+import { ensureDebugBindingLogging } from './utils/debugBindings';
 
 // Consumer-local inbox listeners and collection dispatchers.
 // These files use Fedify vocab types from the consumer's own node_modules,
@@ -78,6 +84,13 @@ function ensureFedInitialized() {
     setupActorDispatcher(fed);
     setupConsumerInboxListeners(fed);
     setupCollectionDispatchers(fed);
+    // Worker-source code bundled into this consumer (inbox processors →
+    // resolveRemoteAccount) calls the worker module's own createFed(),
+    // which is a separate singleton from ours. Give it a key pairs
+    // dispatcher too, or its getDocumentLoader() throws
+    // "No actor key pairs dispatcher registered." and inbound activities
+    // from unknown actors are dropped.
+    setupActorDispatcher(createWorkerModuleFed());
     fedInitialized = true;
   }
   return fed;
@@ -180,6 +193,11 @@ async function processMessageBody(body: Record<string, unknown>): Promise<Proces
       // Fedify does not export its queued Message type; the shape has already
       // been narrowed and filtered above using the runtime payload contract.
       const queuedMessage = filtered.message as any;
+      debugLog('federation.fedify', 'processing queued Fedify task', {
+        messageType: queuedMessage.type,
+        droppedTargets: filtered.droppedTargets,
+        message: queuedMessage,
+      });
       await measureAsync(
         'queue.fedify.processQueuedTask',
         () => fed.processQueuedTask({ env }, queuedMessage),
@@ -188,6 +206,9 @@ async function processMessageBody(body: Record<string, unknown>): Promise<Proces
           droppedTargets: filtered.droppedTargets,
         }
       );
+      debugLog('federation.fedify', 'queued Fedify task processed', {
+        messageType: queuedMessage.type,
+      });
     } finally {
       await result.release?.();
     }
@@ -201,6 +222,7 @@ async function processMessageBody(body: Record<string, unknown>): Promise<Proces
   }
   // body has been validated to have a string `type` field — safe to treat as QueueMessage
   const legacyMsg = body as QueueMessage & Record<string, unknown>;
+  debugLog('queue', `processing legacy message ${legacyMsg.type}`, { message: legacyMsg });
   await measureAsync(
     `queue.legacy.${legacyMsg.type}`,
     async () => {
@@ -321,6 +343,11 @@ async function consumeDlqBatch(batch: MessageBatch): Promise<void> {
   for (const msg of batch.messages) {
     const messageStart = performance.now();
     const body = msg.body as Record<string, unknown>;
+    debugLog('queue.dlq', `message received on ${batch.queue}`, {
+      messageId: msg.id,
+      attempt: msg.attempts,
+      body,
+    });
     try {
       const outcome = await processMessageBody(body);
       if (outcome === 'deferred' && msg.attempts < DLQ_MAX_ATTEMPTS) {
@@ -360,8 +387,12 @@ async function consumeDlqBatch(batch: MessageBatch): Promise<void> {
   }
 }
 
-export default {
+const handler = {
   async queue(batch: MessageBatch, _env: Env): Promise<void> {
+    await ensureFedifyDebugLogging();
+    ensureDebugSentryLogging();
+    ensureDebugBindingLogging();
+
     if (batch.queue.endsWith(DLQ_QUEUE_SUFFIX)) {
       await consumeDlqBatch(batch);
       return;
@@ -372,6 +403,11 @@ export default {
     for (const msg of batch.messages) {
       const messageStart = performance.now();
       const body = msg.body as Record<string, unknown>;
+      debugLog('queue', `message received on ${batch.queue}`, {
+        messageId: msg.id,
+        attempt: msg.attempts,
+        body,
+      });
       try {
         const outcome = await processMessageBody(body);
         if (outcome === 'deferred') {
@@ -381,6 +417,10 @@ export default {
           continue;
         }
         msg.ack();
+        debugLog('queue', `message ${msg.id} ${outcome}`, {
+          queue: batch.queue,
+          durationMs: Math.round(performance.now() - messageStart),
+        });
         logPerformance('queue.message.processed', performance.now() - messageStart, {
           messageType: isFedifyMessage(body) ? 'fedify' : 'legacy',
           ...(typeof body?.type === 'string' ? { legacyType: body.type } : {}),
@@ -417,4 +457,14 @@ export default {
       messageCount: batch.messages.length
     });
   },
-};
+} satisfies ExportedHandler<Env>;
+
+export default Sentry.withSentry(
+  (workerEnv: Env) => ({
+    // SENTRY_DSN is an optional Cloudflare secret; Sentry is disabled when it is unset.
+    dsn: workerEnv.SENTRY_DSN || undefined,
+    tracesSampleRate: 1.0,
+    enableLogs: true,
+  }),
+  handler,
+);

@@ -1,17 +1,24 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
+import { useInstanceStore } from '@/stores/instance'
 import { getAdminSettings, updateAdminSettings, testSmtp } from '@/api/mastodon/admin'
 import { uploadMedia } from '@/api/mastodon/media'
 import AdminLayout from '@/legacy/components/layout/AdminLayout.vue'
 import AdminInvitationSettingsFields from '@/components/admin/AdminInvitationSettingsFields.vue'
+import AdminWorkersAiSettingsFields from '@/components/admin/AdminWorkersAiSettingsFields.vue'
 import { createDefaultInvitationAdminSettings } from '@/types/registration'
+import { createDefaultWorkersAiAdminSettings } from '@/types/workersAi'
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const instanceStore = useInstanceStore()
 const faviconUploading = ref(false)
 const logoUploading = ref(false)
+const workersAiAvailable = computed(
+  () => instanceStore.instance?.configuration.ai?.enabled === true,
+)
 
 const loading = ref(true)
 const saving = ref(false)
@@ -23,6 +30,7 @@ const smtpTestResult = ref('')
 const settings = ref({
   site_title: '',
   site_description: '',
+  instance_languages: 'en',
   site_contact_email: '',
   site_contact_username: '',
   site_favicon_url: '',
@@ -35,6 +43,7 @@ const settings = ref({
   registration_message: '',
   require_email_verification: '1',
   ...createDefaultInvitationAdminSettings(),
+  ...createDefaultWorkersAiAdminSettings(),
   max_toot_chars: '500',
   max_media_attachments: '4',
   smtp_host: '',
@@ -98,6 +107,7 @@ async function handleSave() {
   success.value = ''
   try {
     await updateAdminSettings(auth.token!, settings.value)
+    await instanceStore.fetchInstance()
     success.value = t('admin_settings.saved')
   } catch (e: any) {
     error.value = e?.description || e?.error || t('common.error')
@@ -150,6 +160,11 @@ const labelClass = 'block text-sm font-medium mb-1'
           <div>
             <label :class="labelClass">{{ t('admin_settings.fields.site_description') }}</label>
             <textarea v-model="settings.site_description" rows="3" :class="inputClass" />
+          </div>
+          <div>
+            <label :class="labelClass">{{ t('admin_settings.fields.instance_languages') }}</label>
+            <p class="mb-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin_settings.fields.instance_languages_desc') }}</p>
+            <input v-model="settings.instance_languages" :class="inputClass" placeholder="ko, en" />
           </div>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -255,6 +270,11 @@ const labelClass = 'block text-sm font-medium mb-1'
       </section>
 
       <AdminInvitationSettingsFields :settings="settings" />
+
+      <AdminWorkersAiSettingsFields
+        :settings="settings"
+        :available="workersAiAvailable"
+      />
 
       <!-- Limits -->
       <section class="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6 border border-gray-200 dark:border-gray-700">

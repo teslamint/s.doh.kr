@@ -11,6 +11,7 @@ import {
   base64urlDecode,
 } from '@/api/mastodon/webauthn';
 import { setOnUnauthorized } from '@/api/client';
+import { resetStatusPagePrefetches } from '@/composables/useStatusPagePrefetch';
 import { useTimelinesStore } from './timelines';
 import { useNotificationsStore } from './notifications';
 import { useUiStore } from './ui';
@@ -82,13 +83,13 @@ export const useAuthStore = defineStore('auth', () => {
     loading.value = false;
     error.value = null;
     useUiStore().resetToDefaults();
-    // Stream clients are keyed by feed name, not by access token. Drop the
-    // previous account's clients before a new account tries to connect using
-    // the same keys, otherwise connectStream would keep the old-token stream.
-    if (typeof window !== 'undefined') {
-      useTimelinesStore().disconnectStream();
-      useNotificationsStore().disconnectStream();
-    }
+    // Timelines and their opaque recommendation cursors belong to the account
+    // that requested them. Reset also invalidates in-flight responses and
+    // disconnects old-token streams before the next account can reuse them.
+    useTimelinesStore().reset();
+    // Notifications and their prefetched raw page are account-scoped too.
+    useNotificationsStore().reset();
+    resetStatusPagePrefetches();
   }
 
   function setToken(newToken: string) {

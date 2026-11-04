@@ -27,6 +27,9 @@ import {
   canStoreFetchedRemoteStatus,
   hasOAuthScope,
 } from '../../../../../../packages/shared/permissions';
+import { serializeNaturalLanguageMap } from '../../../../../../packages/shared/utils/naturalLanguage';
+import { debugLog } from '../../../../../../packages/shared/utils/debugLog';
+import { sanitizeArticleHtml, sanitizeHtml, sanitizePlainText } from '../../../utils/sanitize';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -268,6 +271,7 @@ async function resolveRemoteStatusFromUrl(
       : 'Note';
   const jsonLd = await statusObject.toJsonLd({ contextLoader: docLoader });
   const object = normalizeApObject(jsonLd, objectId, fallbackType);
+  const objectUrls = idsFrom((object as Record<string, unknown>).url);
   const actor = statusObject.attributionId?.href ?? idsFrom((object as Record<string, unknown>).attributedTo)[0];
   if (!actor) {
     console.warn(`[search] remote status has no attributedTo: ${objectId}`);
@@ -276,6 +280,7 @@ async function resolveRemoteStatusFromUrl(
   if (!canStoreFetchedRemoteStatus({
     requestedStatusUri: normalizedUrl,
     statusUri: objectId,
+    statusUrlAliases: objectUrls,
     authorUri: actor,
     localInstanceDomain: env.INSTANCE_DOMAIN,
     authorSuspended: false,
@@ -283,7 +288,11 @@ async function resolveRemoteStatusFromUrl(
     console.warn(`[search] remote status identity or attribution mismatch: ${normalizedUrl}`);
     return null;
   }
-  const actorAccountId = await resolveRemoteAccount(actor, viewer?.id ?? null);
+  const actorAccountId = await resolveRemoteAccount(
+    actor,
+    viewer?.id ?? null,
+    docLoader,
+  );
   if (!actorAccountId) return null;
   const actorState = await env.DB.prepare(
     'SELECT suspended_at FROM accounts WHERE id = ? LIMIT 1',
@@ -291,6 +300,7 @@ async function resolveRemoteStatusFromUrl(
   if (!actorState || !canStoreFetchedRemoteStatus({
     requestedStatusUri: normalizedUrl,
     statusUri: objectId,
+    statusUrlAliases: objectUrls,
     authorUri: actor,
     localInstanceDomain: env.INSTANCE_DOMAIN,
     authorSuspended: actorState.suspended_at !== null,
@@ -317,11 +327,23 @@ async function resolveRemoteStatusFromUrl(
   const existingStatus = existingByObjectId ?? existing;
   if (existingStatus) {
     if (!remoteVisible) return null;
+    const objectType = object.type === 'Article' ? 'Article' : 'Note';
+    const titleMap = objectType === 'Article'
+      ? serializeNaturalLanguageMap(object.nameMap, sanitizePlainText)
+      : null;
+    const contentMap = serializeNaturalLanguageMap(
+      object.contentMap,
+      objectType === 'Article' ? sanitizeArticleHtml : sanitizeHtml,
+    );
+    const contentWarningMap = serializeNaturalLanguageMap(object.summaryMap, sanitizeHtml);
     if (
       visibility !== existingStatus.visibility
       || quotePolicy !== existingStatus.quote_policy
       || automaticApprovalsJson !== existingStatus.quote_policy_automatic_approvals
       || manualApprovalsJson !== existingStatus.quote_policy_manual_approvals
+      || titleMap !== null
+      || contentMap !== null
+      || contentWarningMap !== null
     ) {
       await env.DB.prepare(
         `UPDATE statuses
@@ -329,9 +351,22 @@ async function resolveRemoteStatusFromUrl(
              quote_policy = ?2,
              quote_policy_automatic_approvals = ?3,
              quote_policy_manual_approvals = ?4,
-             updated_at = ?5
-         WHERE id = ?6`,
-      ).bind(visibility, quotePolicy, automaticApprovalsJson, manualApprovalsJson, new Date().toISOString(), existingStatus.id).run();
+             title_map = COALESCE(?5, title_map),
+             content_map = COALESCE(?6, content_map),
+             content_warning_map = COALESCE(?7, content_warning_map),
+             updated_at = ?8
+         WHERE id = ?9`,
+      ).bind(
+        visibility,
+        quotePolicy,
+        automaticApprovalsJson,
+        manualApprovalsJson,
+        titleMap,
+        contentMap,
+        contentWarningMap,
+        new Date().toISOString(),
+        existingStatus.id,
+      ).run();
     }
     return await canViewStatusById(existingStatus.id, viewer?.id ?? null) ? existingStatus.id : null;
   }
@@ -367,6 +402,7 @@ app.get('/', authOptional, async (c) => {
   const offset = Math.max(offsetRaw, 0);
   const domain = env.INSTANCE_DOMAIN;
   const currentAccount = c.get('currentAccount');
+  const preferredLanguages = c.get('preferredLanguages');
 
   // Mastodon permits anonymous account/hashtag search and locally-known
   // exact-URL status lookup. Network resolution, offset pagination, and
@@ -462,6 +498,14 @@ app.get('/', authOptional, async (c) => {
       );
       const profileUrl = profileLink?.href;
       console.log(`[search] WebFinger result:`, actorUri || 'null');
+      // The raw WebFinger HTTP exchange is logged by the fetch
+      // instrumentation; this records the parsed JRD and what we chose.
+      debugLog('account.lookup.remote', `webfinger acct:${normalizedAcct}`, {
+        acct: normalizedAcct,
+        webfinger: wfResult,
+        actorUri: actorUri ?? null,
+        profileUrl: profileUrl ?? null,
+      });
       if (
         actorUri
         && canStoreFetchedRemoteActor({
@@ -516,6 +560,12 @@ app.get('/', authOptional, async (c) => {
             console.warn('[search] No local signer available, skipping remote fetch');
           }
           console.log('[search] actorObject:', actorObject ? `id=${actorObject.id?.href}, isActor=${isActor(actorObject)}` : 'null');
+          debugLog('account.lookup.remote', `actor fetch ${actorUri}`, {
+            actorUri,
+            signerUsername: signerUsername ?? null,
+            resolved: !!actorObject && isActor(actorObject),
+            actorId: actorObject?.id?.href ?? null,
+          });
           if (
             actorObject
             && isActor(actorObject)
@@ -667,13 +717,14 @@ app.get('/', authOptional, async (c) => {
       );
       const { results } = await env.DB.prepare(`
         ${STATUS_SEARCH_SELECT}
-        WHERE s.content LIKE ?
+        WHERE (s.content LIKE ? OR s.title LIKE ?)
           AND ${visibility.sql}
           AND ${relationship.sql}
           AND ${reblogOriginal.sql}
         ORDER BY s.id DESC
         LIMIT ? OFFSET ?
       `).bind(
+        searchTerm,
         searchTerm,
         ...visibility.bindings,
         ...relationship.bindings,
@@ -755,6 +806,7 @@ app.get('/', authOptional, async (c) => {
         emojis: e?.emojis,
         quotePolicyAllows: e?.quotePolicyAllows,
         quotePolicyReason: e?.quotePolicyReason,
+        preferredLanguages,
       });
     };
 

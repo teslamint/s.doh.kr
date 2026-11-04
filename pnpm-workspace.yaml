@@ -4,10 +4,9 @@ packages:
   - siliconbeest-email-sender
   - packages/*
 
-onlyBuiltDependencies:
-  - esbuild
-  - sharp
-  - workerd
-
-ignoredBuiltDependencies:
-  - '@parcel/watcher'
+allowBuilds:
+  '@parcel/watcher': false
+  '@sentry/cli': true
+  esbuild: true
+  sharp: true
+  workerd: true

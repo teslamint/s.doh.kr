@@ -7,7 +7,7 @@ import {
 } from '@/api/mastodon/preferences';
 
 export type Theme = 'light' | 'dark' | 'system';
-export type ColumnType =
+export type StandardColumnType =
   | 'home'
   | 'social'
   | 'local'
@@ -15,14 +15,16 @@ export type ColumnType =
   | 'notifications'
   | 'search'
   | 'follow_requests';
+export type ColumnType = 'recommended' | StandardColumnType;
 
 const THEME_KEY = 'siliconbeest_theme';
 const MOBILE_COLUMN_KEY = 'siliconbeest_mobile_column';
 const DEFAULT_COLUMNS: ColumnType[] = [];
 /** Column types the Aurora design's mobile deck can render. */
-export const ALL_COLUMNS: ColumnType[] = ['home', 'local', 'federated', 'notifications'];
+export const ALL_COLUMNS: StandardColumnType[] = ['home', 'local', 'federated', 'notifications'];
 /** Every column type (superset — the deck design supports them all). */
 const VALID_MOBILE_COLUMNS: ColumnType[] = [
+  'recommended',
   'home',
   'social',
   'local',
@@ -87,6 +89,9 @@ export const useUiStore = defineStore('ui', () => {
     typeof window !== 'undefined' ? window.matchMedia(MOBILE_MEDIA_QUERY).matches : false,
   );
   const composeModalOpen = ref(false);
+  // Text to seed the composer with when the modal opens (e.g. /share intent).
+  // Cleared on close so a later plain compose starts empty.
+  const composePrefillText = ref('');
   const mediaViewerOpen = ref(false);
   const mediaViewerIndex = ref(0);
   const mediaViewerItems = ref<string[]>([]);
@@ -136,12 +141,14 @@ export const useUiStore = defineStore('ui', () => {
     deckMenuOpen.value = false;
   }
 
-  function openComposeModal() {
+  function openComposeModal(options?: { prefillText?: string }) {
+    composePrefillText.value = options?.prefillText ?? '';
     composeModalOpen.value = true;
   }
 
   function closeComposeModal() {
     composeModalOpen.value = false;
+    composePrefillText.value = '';
   }
 
   function openMediaViewer(urls: string[], index = 0) {
@@ -292,6 +299,7 @@ export const useUiStore = defineStore('ui', () => {
     isMobile,
     isDark,
     composeModalOpen,
+    composePrefillText,
     mediaViewerOpen,
     mediaViewerIndex,
     mediaViewerItems,

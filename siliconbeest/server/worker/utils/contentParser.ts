@@ -3,6 +3,9 @@
  * Converts plain text with @mentions, #hashtags, and URLs into HTML.
  */
 
+import { marked } from 'marked';
+import { sanitizeArticleHtml, sanitizePlainText } from './sanitize';
+
 export type ParsedMention = {
 	username: string;
 	domain: string | null;
@@ -50,6 +53,30 @@ export function parseContent(text: string, domain: string): ParsedContent {
 	const html = htmlParagraphs.join('');
 
 	return { html, mentions, tags };
+}
+
+/** Render long-form Article source as safe Markdown while retaining mention/tag discovery. */
+export function parseArticleContent(text: string, domain: string): ParsedContent {
+	const rendered = marked.parse(text, { async: false, gfm: true }) as string;
+	const html = sanitizeArticleHtml(rendered);
+	const metadataText = sanitizePlainText(
+		html
+			.replace(/<pre\b[^>]*>[\s\S]*?<\/pre\s*>/gi, ' ')
+			.replace(/<code\b[^>]*>[\s\S]*?<\/code\s*>/gi, ' '),
+	);
+	const metadata = parseContent(metadataText, domain);
+	return {
+		...metadata,
+		html,
+	};
+}
+
+/** Build the compact Note fallback recommended by FEP-b2b8. */
+export function buildArticlePreviewContent(title: string, summary: string): string {
+	const titleHtml = title ? `<p><strong>${escapeHtml(title)}</strong></p>` : '';
+	const summaryText = sanitizePlainText(summary);
+	const summaryHtml = summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '';
+	return `${titleHtml}${summaryHtml}`;
 }
 
 /**

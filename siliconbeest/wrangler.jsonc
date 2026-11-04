@@ -1,9 +1,13 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "siliconbeest",
-	"preview_urls": true,
+	"preview_urls": false,
 	"compatibility_date": "2026-06-16",
+	// Nuxt emits the production Cloudflare Worker entrypoint during `pnpm run build`.
 	"main": ".output/server/index.mjs",
+	// Emit source maps in the deploy bundle (Cloudflare-native readable traces;
+	// CI also uploads them to Sentry when SENTRY_AUTH_TOKEN is configured).
+	"upload_source_maps": true,
 	"assets": {
 		"directory": "./.output/public",
 		"not_found_handling": "none",
@@ -29,13 +33,26 @@
 		"mode": "smart"
 	},
 
-	// Environment Variables (set SETUP_SECRET via `wrangler secret put SETUP_SECRET` before first-run setup)
+	// Environment Variables (set SETUP_SECRET via `wrangler secret put SETUP_SECRET` before first-run setup;
+	// optional `wrangler secret put SENTRY_DSN` enables Sentry error reporting in the worker)
 	"vars": {
 		"INSTANCE_DOMAIN": "s.doh.kr",
 		"INSTANCE_TITLE": "SiliconBeest",
 		"REPOSITORY_URL": "https://github.com/teslamint/s.doh.kr",
 		"REGISTRATION_MODE": "approval",
-		"SKIP_SIGNATURE_VERIFICATION": false
+		"SKIP_SIGNATURE_VERIFICATION": false,
+		// Verbose debug logging (full federation request/response payloads,
+		// per-request user activity). Ultra-sensitive values (private keys,
+		// passwords, tokens) are always redacted. Off unless exactly true.
+		"DEBUG": false,
+		"WORKERS_AI_ENABLED": false,
+		"WORKERS_AI_RECOMMENDATION_MODEL": "@cf/baai/bge-m3",
+		"WORKERS_AI_TRANSLATION_MODEL": "@cf/meta/m2m100-1.2b",
+		"WORKERS_AI_IMAGE_CAPTION_MODEL": "@cf/moondream/moondream3.1-9B-A2B",
+		"WORKERS_AI_RATE_LIMITS": true,
+		"WORKERS_AI_RECOMMENDATION_RATE_LIMIT_PERIOD_SECONDS": 60,
+		"WORKERS_AI_TRANSLATION_RATE_LIMIT_PERIOD_SECONDS": 60,
+		"WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_PERIOD_SECONDS": 60
 	},
 
 	// D1 Database
@@ -101,6 +118,9 @@
 	"migrations": [
 		{
 			"tag": "v1",
+			// SQLite-backed: new accounts can no longer create KV-backed DO
+			// namespaces (API error 10099). Already-deployed workers keep their
+			// existing backend — applied migration tags are never re-run.
 			"new_sqlite_classes": ["StreamingDO"]
 		}
 	],

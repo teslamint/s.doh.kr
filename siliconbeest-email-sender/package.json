@@ -11,9 +11,12 @@
 	"devDependencies": {
 		"@types/node": "^25.5.0",
 		"typescript": "^5.5.2",
-		"wrangler": "4.107.0"
+		"wrangler": "4.136.3"
 	},
 	"dependencies": {
 		"worker-mailer": "^1.2.1"
+	},
+	"engines": {
+		"node": ">=25.0.0"
 	}
 }

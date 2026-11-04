@@ -1,14 +1,29 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
 import type { StatusVisibility, MediaAttachment, Status, QuotePolicy } from '@/types/mastodon';
-import { createStatus, editStatus } from '@/api/mastodon/statuses';
+import { createStatus, editStatus, getStatusSource } from '@/api/mastodon/statuses';
 import { updateCredentials } from '@/api/mastodon/accounts';
-import { uploadMedia } from '@/api/mastodon/media';
+import { pollMediaDescription, uploadMedia } from '@/api/mastodon/media';
 import { useAuthStore } from './auth';
 import { useStatusesStore } from './statuses';
 import { useTimelinesStore } from './timelines';
 
-const MAX_CHARACTERS = 500;
+const MAX_NOTE_CHARACTERS = 500;
+const MAX_ARTICLE_CHARACTERS = 100_000;
+const MAX_ARTICLE_TITLE_CHARACTERS = 200;
+
+function plainTextFromHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>\s*<p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'");
+}
 
 export const useComposeStore = defineStore('compose', () => {
   const defaultVisibility = ref<StatusVisibility>('public');
@@ -23,6 +38,9 @@ export const useComposeStore = defineStore('compose', () => {
     defaultQuotePolicy.value = policy ?? 'public';
   }, { immediate: true });
   const text = ref('');
+  const objectType = ref<'Note' | 'Article'>('Note');
+  const title = ref('');
+  const articleSummary = ref('');
   const contentWarning = ref('');
   const showContentWarning = ref(false);
   const visibility = ref<StatusVisibility>(defaultVisibility.value);
@@ -36,6 +54,12 @@ export const useComposeStore = defineStore('compose', () => {
   const mediaAttachments = ref<MediaAttachment[]>([]);
   const uploading = ref(false);
   const publishing = ref(false);
+  const activeMediaDescriptionPolls = new Map<string, {
+    controller: AbortController;
+    promise: Promise<MediaAttachment | null>;
+  }>();
+  const manuallyEditedMediaDescriptions = new Set<string>();
+  const unreviewedGeneratedMediaDescriptionIds = ref<string[]>([]);
   // Incremented on each successful publish — composers watch this to clear
   // their local drafts only once the post has really gone out
   const publishedTick = ref(0);
@@ -49,17 +73,26 @@ export const useComposeStore = defineStore('compose', () => {
   const showPoll = ref(false);
 
   const charCount = computed(() => text.value.length);
-  const remaining = computed(() => MAX_CHARACTERS - charCount.value);
+  const characterLimit = computed(() => objectType.value === 'Article' ? MAX_ARTICLE_CHARACTERS : MAX_NOTE_CHARACTERS);
+  const remaining = computed(() => characterLimit.value - charCount.value);
   const canPublish = computed(
     () =>
       !publishing.value &&
       !uploading.value &&
       (text.value.trim().length > 0 || mediaAttachments.value.length > 0) &&
+      (objectType.value !== 'Article' || (title.value.trim().length > 0 && title.value.length <= MAX_ARTICLE_TITLE_CHARACTERS)) &&
       remaining.value >= 0,
   );
 
   function reset() {
+    for (const poll of activeMediaDescriptionPolls.values()) poll.controller.abort();
+    activeMediaDescriptionPolls.clear();
+    manuallyEditedMediaDescriptions.clear();
+    unreviewedGeneratedMediaDescriptionIds.value = [];
     text.value = '';
+    objectType.value = 'Note';
+    title.value = '';
+    articleSummary.value = '';
     contentWarning.value = '';
     showContentWarning.value = false;
     visibility.value = defaultVisibility.value;
@@ -127,14 +160,43 @@ export const useComposeStore = defineStore('compose', () => {
   }
 
   function setEditing(status: Status) {
+    // Editing starts a clean compose session so stale reply, quote, poll, or
+    // draft state cannot be submitted with the edited status.
+    reset();
     editingId.value = status.id;
-    text.value = status.text ?? '';
+    objectType.value = status.object_type === 'Article' ? 'Article' : 'Note';
+    title.value = status.title ?? '';
+    articleSummary.value = status.article_summary ?? '';
+    text.value = status.text ?? plainTextFromHtml(status.content ?? '');
     contentWarning.value = status.spoiler_text;
     showContentWarning.value = !!status.spoiler_text;
     visibility.value = status.visibility;
     sensitive.value = status.sensitive;
     mediaAttachments.value = [...status.media_attachments];
     language.value = status.language ?? 'en';
+    quotePolicy.value = status.quote_policy ?? defaultQuotePolicy.value;
+  }
+
+  async function beginEditing(status: Status) {
+    const auth = useAuthStore();
+    if (!auth.token) return false;
+
+    try {
+      const { data: source } = await getStatusSource(status.id, auth.token);
+      setEditing({
+        ...status,
+        object_type: source.object_type,
+        title: source.title,
+        article_summary: source.article_summary,
+        text: source.text,
+        spoiler_text: source.spoiler_text,
+      });
+    } catch {
+      // The source endpoint is authoritative, but the cached status still
+      // provides a usable fallback if the request fails temporarily.
+      setEditing(status);
+    }
+    return true;
   }
 
   async function addMedia(file: File) {
@@ -145,12 +207,148 @@ export const useComposeStore = defineStore('compose', () => {
     try {
       const { data } = await uploadMedia(file, { token: auth.token });
       mediaAttachments.value.push(data);
+      if (data.description_generation_status === 'pending') {
+        void startMediaDescriptionPolling(data, auth.token);
+      } else if (
+        data.description_generation_status === 'complete'
+        && data.description
+      ) {
+        markGeneratedMediaDescriptionForReview(data.id);
+      }
+      return data;
     } finally {
       uploading.value = false;
     }
   }
 
-  function removeMedia(id: string) {
+  const hasUnreviewedGeneratedAltText = computed(
+    () => unreviewedGeneratedMediaDescriptionIds.value.length > 0,
+  );
+
+  function markGeneratedMediaDescriptionForReview(id: string) {
+    if (!unreviewedGeneratedMediaDescriptionIds.value.includes(id)) {
+      unreviewedGeneratedMediaDescriptionIds.value.push(id);
+    }
+  }
+
+  function markMediaDescriptionReviewed(id: string) {
+    unreviewedGeneratedMediaDescriptionIds.value =
+      unreviewedGeneratedMediaDescriptionIds.value.filter((mediaId) => mediaId !== id);
+  }
+
+  function setLocalMediaDescriptionStatus(
+    media: MediaAttachment,
+    status: NonNullable<MediaAttachment['description_generation_status']>,
+    error: MediaAttachment['description_generation_error'] = null,
+  ) {
+    media.description_generation_status = status;
+    media.description_generation_error = error;
+    const attachedIndex = mediaAttachments.value.findIndex((item) => item.id === media.id);
+    const attached = mediaAttachments.value[attachedIndex];
+    if (attachedIndex >= 0 && attached) {
+      mediaAttachments.value[attachedIndex] = {
+        ...attached,
+        description_generation_status: status,
+        description_generation_error: error,
+      };
+    }
+  }
+
+  function startMediaDescriptionPolling(
+    media: MediaAttachment,
+    token: string,
+  ): Promise<MediaAttachment | null> {
+    const existing = activeMediaDescriptionPolls.get(media.id);
+    if (existing) return existing.promise;
+
+    const controller = new AbortController();
+    const promise = pollMediaDescription(media.id, token, { signal: controller.signal })
+      .then((latest) => {
+        if (
+          controller.signal.aborted
+          || manuallyEditedMediaDescriptions.has(media.id)
+        ) {
+          return null;
+        }
+        if (!latest) {
+          setLocalMediaDescriptionStatus(media, 'failed', 'timeout');
+          return null;
+        }
+
+        const resolved = latest.description_generation_status === 'pending'
+          ? {
+              ...latest,
+              description_generation_status: 'failed' as const,
+              description_generation_error: 'timeout' as const,
+            }
+          : latest;
+        Object.assign(media, resolved);
+        const attachedIndex = mediaAttachments.value.findIndex((item) => item.id === media.id);
+        const attached = mediaAttachments.value[attachedIndex];
+        if (attachedIndex >= 0 && attached) {
+          mediaAttachments.value[attachedIndex] = {
+            ...attached,
+            ...resolved,
+          };
+        }
+        if (
+          resolved.description_generation_status === 'complete'
+          && resolved.description
+        ) {
+          markGeneratedMediaDescriptionForReview(media.id);
+        }
+        return resolved;
+      })
+      .catch(() => {
+        if (
+          !controller.signal.aborted
+          && !manuallyEditedMediaDescriptions.has(media.id)
+        ) {
+          setLocalMediaDescriptionStatus(media, 'failed', 'timeout');
+        }
+        return null;
+      })
+      .finally(() => {
+        if (activeMediaDescriptionPolls.get(media.id)?.controller === controller) {
+          activeMediaDescriptionPolls.delete(media.id);
+        }
+      });
+
+    activeMediaDescriptionPolls.set(media.id, { controller, promise });
+    return promise;
+  }
+
+  function waitForMediaDescription(id: string): Promise<MediaAttachment | null> {
+    const active = activeMediaDescriptionPolls.get(id);
+    if (active) return active.promise;
+    return Promise.resolve(mediaAttachments.value.find((media) => media.id === id) ?? null);
+  }
+
+  function markMediaDescriptionEdited(id: string) {
+    manuallyEditedMediaDescriptions.add(id);
+    activeMediaDescriptionPolls.get(id)?.controller.abort();
+    activeMediaDescriptionPolls.delete(id);
+  }
+
+  function resumeMediaDescriptionPolling(id: string) {
+    const auth = useAuthStore();
+    const media = mediaAttachments.value.find((item) => item.id === id);
+    manuallyEditedMediaDescriptions.delete(id);
+    if (
+      auth.token
+      && media?.description_generation_status === 'pending'
+    ) {
+      void startMediaDescriptionPolling(media, auth.token);
+    }
+  }
+
+  function removeMedia(id: string, cancelDescriptionPolling = true) {
+    if (cancelDescriptionPolling) {
+      activeMediaDescriptionPolls.get(id)?.controller.abort();
+      activeMediaDescriptionPolls.delete(id);
+      manuallyEditedMediaDescriptions.delete(id);
+      markMediaDescriptionReviewed(id);
+    }
     mediaAttachments.value = mediaAttachments.value.filter((m) => m.id !== id);
   }
 
@@ -162,6 +360,9 @@ export const useComposeStore = defineStore('compose', () => {
     try {
       const params = {
         status: text.value,
+        object_type: objectType.value,
+        title: objectType.value === 'Article' ? title.value.trim() : undefined,
+        summary: objectType.value === 'Article' ? articleSummary.value.trim() || undefined : undefined,
         media_ids: mediaAttachments.value.map((m) => m.id),
         in_reply_to_id: inReplyToId.value ?? undefined,
         sensitive: sensitive.value,
@@ -216,6 +417,9 @@ export const useComposeStore = defineStore('compose', () => {
 
   return {
     text,
+    objectType,
+    title,
+    articleSummary,
     contentWarning,
     showContentWarning,
     visibility,
@@ -241,13 +445,20 @@ export const useComposeStore = defineStore('compose', () => {
     showPoll,
     charCount,
     remaining,
+    characterLimit,
     canPublish,
+    hasUnreviewedGeneratedAltText,
     reset,
     setReplyTo,
     setQuote,
     clearQuote,
     setEditing,
+    beginEditing,
     addMedia,
+    waitForMediaDescription,
+    markMediaDescriptionEdited,
+    markMediaDescriptionReviewed,
+    resumeMediaDescriptionPolling,
     removeMedia,
     publish,
   };

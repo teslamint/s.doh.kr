@@ -1,26 +1,55 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Listbox, ListboxButton, ListboxOptions, ListboxOption } from '@headlessui/vue'
+import {
+  Dialog,
+  DialogPanel,
+  DialogTitle,
+  Listbox,
+  ListboxButton,
+  ListboxOptions,
+  ListboxOption,
+  TransitionChild,
+  TransitionRoot,
+} from '@headlessui/vue'
 import { useComposeStore } from '@/stores/compose'
+import { useDraftsStore, hasDraftContent, type ComposeDraft, type ComposeDraftInput } from '@/stores/drafts'
 import { useEmojis } from '@/composables/useEmojis'
 import { search as apiSearch } from '@/api/mastodon/search'
 import { useAuthStore } from '@/stores/auth'
 import EmojiPicker from '@/components/common/EmojiPicker.vue'
+import { articleMediaMarkdown } from '@/utils/markdownMedia'
+import { updateMedia } from '@/api/mastodon/media'
+import type { MediaAttachment } from '@/types/mastodon'
 
 const { t } = useI18n()
 const compose = useComposeStore()
+const drafts = useDraftsStore()
 const auth = useAuthStore()
 const { fetchCustomEmojis, searchEmojis } = useEmojis()
+
+// Remote drafts are session data: fetch them when a composer is entered,
+// rather than as a side effect of booting the full application.
+watch(
+  [() => auth.currentUser?.id ?? null, () => auth.token],
+  ([accountId, token]) => {
+    if (accountId && token) void drafts.refresh()
+  },
+  { immediate: true },
+)
 
 const props = defineProps<{
   replyTo?: { id: string; account: { acct: string }; mentions?: Array<{ acct: string }>; visibility?: string }
   maxChars?: number
+  initialText?: string
 }>()
 
 const emit = defineEmits<{
   submit: [payload: {
     content: string
+    object_type: 'Note' | 'Article'
+    title?: string
+    summary?: string
     spoiler_text: string
     visibility: string
     language: string
@@ -28,21 +57,30 @@ const emit = defineEmits<{
     quote_id?: string
     quote_policy?: import('@/types/mastodon').QuotePolicy
     media_ids?: string[]
+    draft_id?: string
   }]
 }>()
 
-const content = ref('')
-const spoilerText = ref('')
-const showCw = ref(false)
+defineExpose({ finishDraftSession })
+
+const isEditing = computed(() => compose.editingId !== null)
+const content = ref(isEditing.value ? compose.text : (props.initialText ?? ''))
+const objectType = ref<'Note' | 'Article'>(isEditing.value ? compose.objectType : 'Note')
+const articleTitle = ref(isEditing.value ? compose.title : '')
+const articleSummary = ref(isEditing.value ? compose.articleSummary : '')
+const spoilerText = ref(isEditing.value ? compose.contentWarning : '')
+const showCw = ref(isEditing.value ? compose.showContentWarning : false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
-const charLimit = computed(() => props.maxChars ?? 500)
+const charLimit = computed(() => objectType.value === 'Article' ? 100_000 : (props.maxChars ?? 500))
 const charsRemaining = computed(() => charLimit.value - content.value.length)
+const mountedPublishedTick = compose.publishedTick
 
 // ── Emoji picker state ──────────────────────────────────────────────
 const showEmojiPicker = ref(false)
 const emojiPickerRef = ref<HTMLElement | null>(null)
 const emojiButtonRef = ref<HTMLElement | null>(null)
+const showDraftMenu = ref(false)
 
 /** Position the emoji picker above the button, teleported to body */
 const emojiPickerPosition = computed(() => {
@@ -132,12 +170,13 @@ function populateReplyMentions(replyTo: typeof props.replyTo) {
 
 // When reply target changes
 watch(() => props.replyTo?.id, (newId, oldId) => {
-  if (!newId || newId === oldId) return
+  if (!newId || newId === oldId || isHydratingDraft.value) return
   populateReplyMentions(props.replyTo)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  finishDraftSession()
 })
 
 function handleClickOutside(e: MouseEvent) {
@@ -177,6 +216,86 @@ function insertAtCursor(text: string) {
   })
 }
 
+function insertArticleMedia(media: MediaAttachment, fileName?: string): string {
+  const ta = textareaRef.value
+  const start = ta?.selectionStart ?? content.value.length
+  const end = ta?.selectionEnd ?? content.value.length
+  const before = content.value.substring(0, start)
+  const after = content.value.substring(end)
+  const prefix = before.length > 0 && !before.endsWith('\n') ? '\n\n' : ''
+  const suffix = after.length > 0 && !after.startsWith('\n') ? '\n\n' : ''
+  const mediaMarkdown = articleMediaMarkdown(media, fileName)
+  const markdown = `${prefix}${mediaMarkdown}${suffix}`
+  content.value = before + markdown + after
+  nextTick(() => {
+    if (!ta) return
+    const pos = start + markdown.length
+    ta.selectionStart = pos
+    ta.selectionEnd = pos
+    ta.focus()
+  })
+  compose.removeMedia(media.id, false)
+  return mediaMarkdown
+}
+
+const generatedArticleMediaMarkdown = new Map<string, string>()
+
+function trackGeneratedArticleDescription(
+  result: Promise<MediaAttachment | null>,
+  insertedMarkdown: string,
+  fileName?: string,
+) {
+  void result.then((resolvedMedia) => {
+    if (!resolvedMedia?.description) return
+    const generatedMarkdown = articleMediaMarkdown(resolvedMedia, fileName)
+    if (generatedMarkdown === insertedMarkdown) {
+      generatedArticleMediaMarkdown.set(resolvedMedia.id, generatedMarkdown)
+      return
+    }
+
+    // Replace only the exact Markdown originally inserted by the composer.
+    // If the author edited its label or URL while AI was running, the
+    // original no longer matches and their manual Markdown always wins.
+    const insertionIndex = content.value.indexOf(insertedMarkdown)
+    if (insertionIndex < 0) {
+      compose.markMediaDescriptionReviewed(resolvedMedia.id)
+      return
+    }
+    content.value = content.value.slice(0, insertionIndex)
+      + generatedMarkdown
+      + content.value.slice(insertionIndex + insertedMarkdown.length)
+    generatedArticleMediaMarkdown.set(resolvedMedia.id, generatedMarkdown)
+  })
+}
+
+function reviewEditedGeneratedArticleAlt() {
+  for (const [mediaId, generatedMarkdown] of generatedArticleMediaMarkdown) {
+    if (!content.value.includes(generatedMarkdown)) {
+      compose.markMediaDescriptionReviewed(mediaId)
+      generatedArticleMediaMarkdown.delete(mediaId)
+    }
+  }
+}
+
+async function addComposerMedia(file: File) {
+  const media = await compose.addMedia(file)
+  if (media && objectType.value === 'Article') {
+    const descriptionResult = media.description_generation_status === 'pending'
+      ? compose.waitForMediaDescription(media.id)
+      : null
+    const insertedMarkdown = insertArticleMedia(media, file.name)
+
+    if (descriptionResult) {
+      trackGeneratedArticleDescription(descriptionResult, insertedMarkdown, file.name)
+    } else if (
+      media.description_generation_status === 'complete'
+      && media.description
+    ) {
+      generatedArticleMediaMarkdown.set(media.id, insertedMarkdown)
+    }
+  }
+}
+
 // ── Autocomplete state ──────────────────────────────────────────────
 const autocompleteRef = ref<HTMLElement | null>(null)
 const autocompleteVisible = ref(false)
@@ -201,6 +320,7 @@ function closeAutocomplete() {
 }
 
 function onTextareaInput() {
+  reviewEditedGeneratedArticleAlt()
   detectAutocomplete()
 }
 
@@ -412,10 +532,237 @@ const quotePolicyIcons: Record<import('@/types/mastodon').QuotePolicy, string> =
   nobody: '⊘',
 }
 
-const canSubmit = computed(() => {
-  const hasContent = content.value.trim().length > 0 || compose.mediaAttachments.length > 0 || !!compose.quoteStatus
-  return hasContent && charsRemaining.value >= 0 && !compose.uploading
+const AUTOSAVE_DELAY_MS = 1000
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null
+let draftSessionFinished = false
+const isHydratingDraft = ref(false)
+const draftSavedAt = ref<string | null>(null)
+const draftSaveLabel = computed(() => {
+  if (drafts.saving) return t('compose.draft_saving')
+  if (drafts.error) return t('compose.draft_save_failed')
+  return draftSavedAt.value ? t('compose.draft_saved') : t('compose.save_draft')
 })
+
+function draftSnapshot(): ComposeDraftInput {
+  return {
+    content: content.value,
+    objectType: objectType.value,
+    articleTitle: articleTitle.value,
+    articleSummary: articleSummary.value,
+    spoilerText: spoilerText.value,
+    showContentWarning: showCw.value,
+    visibility: selectedVisibility.value.value as import('@/types/mastodon').StatusVisibility,
+    language: selectedLanguage.value.code,
+    sensitive: compose.sensitive,
+    quotePolicy: compose.quotePolicy,
+    mediaAttachments: [...compose.mediaAttachments],
+    showPoll: compose.showPoll,
+    pollOptions: [...compose.pollOptions],
+    pollExpiresIn: compose.pollExpiresIn,
+    pollMultiple: compose.pollMultiple,
+    inReplyToId: compose.inReplyToId,
+    inReplyToStatus: compose.inReplyToStatus,
+    quoteId: compose.quoteId,
+    quoteStatus: compose.quoteStatus,
+  }
+}
+
+const canSaveDraft = computed(() => !isEditing.value && hasDraftContent(draftSnapshot()))
+
+async function saveDraftNow() {
+  if (isEditing.value || isHydratingDraft.value) return null
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer)
+    autosaveTimer = null
+  }
+  const saved = await drafts.save(draftSnapshot())
+  draftSavedAt.value = saved?.updatedAt ?? null
+  return saved
+}
+
+function finishDraftSession() {
+  if (draftSessionFinished) return
+  draftSessionFinished = true
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer)
+    autosaveTimer = null
+  }
+  if (!isEditing.value && compose.publishedTick === mountedPublishedTick) {
+    void saveDraftNow()
+  }
+  drafts.startFresh()
+  compose.reset()
+  generatedArticleMediaMarkdown.clear()
+  content.value = ''
+  objectType.value = 'Note'
+  articleTitle.value = ''
+  articleSummary.value = ''
+  spoilerText.value = ''
+  showCw.value = false
+  draftSavedAt.value = null
+  showDraftMenu.value = false
+}
+
+function scheduleDraftSave() {
+  if (draftSessionFinished || isEditing.value || isHydratingDraft.value) return
+  draftSavedAt.value = null
+  if (autosaveTimer) clearTimeout(autosaveTimer)
+  autosaveTimer = setTimeout(() => {
+    autosaveTimer = null
+    void saveDraftNow()
+  }, AUTOSAVE_DELAY_MS)
+}
+
+async function loadDraft(id: string) {
+  await saveDraftNow()
+  const draft = drafts.drafts.find((item) => item.id === id)
+  if (!draft) return
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer)
+    autosaveTimer = null
+  }
+
+  isHydratingDraft.value = true
+  compose.reset()
+  generatedArticleMediaMarkdown.clear()
+  drafts.select(id)
+  content.value = draft.content
+  objectType.value = draft.objectType
+  articleTitle.value = draft.articleTitle
+  articleSummary.value = draft.articleSummary
+  spoilerText.value = draft.spoilerText
+  showCw.value = draft.showContentWarning
+  selectedVisibility.value = visibilityOptions.find(option => option.value === draft.visibility)
+    ?? visibilityOptions[0]!
+  selectedLanguage.value = languageOptions.find(option => option.code === draft.language)
+    ?? languageOptions[1]!
+  compose.sensitive = draft.sensitive
+  compose.quotePolicy = draft.quotePolicy
+  compose.mediaAttachments = draft.mediaAttachments.map(media => ({ ...media }))
+  compose.showPoll = draft.showPoll
+  compose.pollOptions = [...draft.pollOptions]
+  compose.pollExpiresIn = draft.pollExpiresIn
+  compose.pollMultiple = draft.pollMultiple
+  compose.inReplyToId = draft.inReplyToId
+  compose.inReplyToStatus = null
+  compose.quoteId = draft.quoteId
+  compose.quoteStatus = null
+  draftSavedAt.value = draft.updatedAt
+  showDraftMenu.value = false
+
+  nextTick(() => {
+    isHydratingDraft.value = false
+    textareaRef.value?.focus()
+  })
+}
+
+async function removeDraft(id: string) {
+  await drafts.remove(id)
+  if (drafts.activeDraftId === null) draftSavedAt.value = null
+}
+
+function draftTitle(draft: ComposeDraft): string {
+  return draft.articleTitle.trim()
+    || draft.content.trim().split(/\r?\n/, 1)[0]?.slice(0, 80)
+    || t('compose.untitled_draft')
+}
+
+function formatDraftDate(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
+}
+
+watch(
+  () => ({
+    content: content.value,
+    objectType: objectType.value,
+    articleTitle: articleTitle.value,
+    articleSummary: articleSummary.value,
+    spoilerText: spoilerText.value,
+    showCw: showCw.value,
+    visibility: selectedVisibility.value.value,
+    language: selectedLanguage.value.code,
+    sensitive: compose.sensitive,
+    quotePolicy: compose.quotePolicy,
+    mediaAttachments: compose.mediaAttachments,
+    showPoll: compose.showPoll,
+    pollOptions: compose.pollOptions,
+    pollExpiresIn: compose.pollExpiresIn,
+    pollMultiple: compose.pollMultiple,
+    inReplyToId: compose.inReplyToId,
+    quoteId: compose.quoteId,
+    draftAccountId: drafts.accountId,
+  }),
+  scheduleDraftSave,
+  { deep: true },
+)
+
+function loadEditingDraft() {
+  if (!compose.editingId) return
+  content.value = compose.text
+  objectType.value = compose.objectType
+  articleTitle.value = compose.title
+  articleSummary.value = compose.articleSummary
+  spoilerText.value = compose.contentWarning
+  showCw.value = compose.showContentWarning
+  selectedVisibility.value = visibilityOptions.find(option => option.value === compose.visibility)
+    ?? visibilityOptions[0]!
+  selectedLanguage.value = languageOptions.find(option => option.code === compose.language)
+    ?? languageOptions[1]!
+}
+
+watch(() => compose.editingId, (editingId) => {
+  if (editingId) {
+    generatedArticleMediaMarkdown.clear()
+    loadEditingDraft()
+  } else {
+    // Runs immediately on mount, so keep any share-intent prefill
+    content.value = props.initialText ?? ''
+    objectType.value = 'Note'
+    articleTitle.value = ''
+    articleSummary.value = ''
+    spoilerText.value = ''
+    showCw.value = false
+  }
+}, { immediate: true })
+
+const canSubmit = computed(() => {
+  const hasContent = content.value.trim().length > 0
+    || compose.mediaAttachments.length > 0
+    || Boolean(compose.quoteId)
+  const validTitle = objectType.value !== 'Article'
+    || (articleTitle.value.trim().length > 0 && articleTitle.value.length <= 200)
+  return hasContent && validTitle && charsRemaining.value >= 0 && !compose.uploading
+})
+
+async function selectObjectType(type: 'Note' | 'Article') {
+  objectType.value = type
+  if (type === 'Article') {
+    if (compose.showPoll) togglePoll()
+    showCw.value = false
+    for (const media of [...compose.mediaAttachments]) {
+      const descriptionResult = media.description_generation_status === 'pending'
+        ? compose.waitForMediaDescription(media.id)
+        : null
+      const insertedMarkdown = insertArticleMedia(media)
+      if (descriptionResult) {
+        trackGeneratedArticleDescription(descriptionResult, insertedMarkdown)
+      } else if (
+        media.description_generation_status === 'complete'
+        && media.description
+      ) {
+        generatedArticleMediaMarkdown.set(media.id, insertedMarkdown)
+      }
+      await nextTick()
+    }
+  }
+}
 
 function togglePoll() {
   if (compose.showPoll) {
@@ -437,7 +784,7 @@ async function onFileSelect(event: Event) {
 
   for (const file of Array.from(input.files)) {
     if (compose.mediaAttachments.length >= 4) break
-    await compose.addMedia(file)
+    await addComposerMedia(file)
   }
 
   // Reset input so the same file can be re-selected
@@ -445,30 +792,76 @@ async function onFileSelect(event: Event) {
 }
 
 // ── ALT text editor ─────────────────────────────────────────────────
-const altEditMedia = ref<any>(null)
+const altEditMedia = ref<MediaAttachment | null>(null)
 const altEditText = ref('')
+const altEditDirty = ref(false)
+const altSaving = ref(false)
 
-function openAltEditor(media: any) {
+function openAltEditor(media: MediaAttachment) {
+  if (altSaving.value) return
   altEditMedia.value = media
   altEditText.value = media.description || ''
+  altEditDirty.value = false
+}
+
+function altGenerationFailureMessage(media: MediaAttachment) {
+  if (media.description_generation_error === 'rate_limited') {
+    return t('compose.alt_generation_rate_limited')
+  }
+  if (media.description_generation_error === 'rate_limiter_unavailable') {
+    return t('compose.alt_generation_unavailable')
+  }
+  return t('compose.alt_generation_failed')
+}
+
+function onAltInput() {
+  if (!altEditMedia.value || altEditDirty.value) return
+  altEditDirty.value = true
+  compose.markMediaDescriptionEdited(altEditMedia.value.id)
+}
+
+function closeAltEditor() {
+  if (altSaving.value) return
+  if (altEditMedia.value && altEditDirty.value) {
+    compose.resumeMediaDescriptionPolling(altEditMedia.value.id)
+  }
+  altEditMedia.value = null
+  altEditDirty.value = false
 }
 
 async function saveAlt() {
-  if (!altEditMedia.value || !auth.token) return
+  if (!altEditMedia.value || !auth.token || altSaving.value) return
+  const media = altEditMedia.value
+  const mediaId = media.id
+  altEditDirty.value = true
+  altSaving.value = true
+  compose.markMediaDescriptionEdited(mediaId)
   try {
-    // Update via API
-    const res = await fetch(`/api/v1/media/${altEditMedia.value.id}`, {
-      method: 'PUT',
-      headers: { 'Authorization': `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description: altEditText.value }),
-    })
-    if (res.ok) {
-      // Update local state
-      altEditMedia.value.description = altEditText.value
+    const { data } = await updateMedia(
+      mediaId,
+      { description: altEditText.value },
+      auth.token,
+    )
+    Object.assign(media, data)
+    compose.markMediaDescriptionReviewed(mediaId)
+    if (altEditMedia.value === media) {
+      altEditMedia.value = null
+      altEditDirty.value = false
     }
-  } catch { /* ignore */ }
-  altEditMedia.value = null
+  } catch {
+    // Keep the editor and the author's text open so a transient failure can
+    // be retried without allowing a polling response to replace their input.
+  } finally {
+    altSaving.value = false
+  }
 }
+
+watch(
+  () => altEditMedia.value?.description,
+  (description) => {
+    if (!altEditDirty.value) altEditText.value = description || ''
+  },
+)
 
 /** Handle paste events — if clipboard contains images, upload them */
 async function onPaste(event: ClipboardEvent) {
@@ -480,7 +873,7 @@ async function onPaste(event: ClipboardEvent) {
       event.preventDefault()
       const file = item.getAsFile()
       if (file && compose.mediaAttachments.length < 4) {
-        await compose.addMedia(file)
+        await addComposerMedia(file)
       }
     }
   }
@@ -494,7 +887,7 @@ async function onDrop(event: DragEvent) {
   for (const file of Array.from(files)) {
     if (compose.mediaAttachments.length >= 4) break
     if (file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/')) {
-      await compose.addMedia(file)
+      await addComposerMedia(file)
     }
   }
 }
@@ -503,13 +896,17 @@ function submit() {
   if (!canSubmit.value) return
   emit('submit', {
     content: content.value,
+    object_type: objectType.value,
+    title: objectType.value === 'Article' ? articleTitle.value.trim() : undefined,
+    summary: objectType.value === 'Article' ? articleSummary.value.trim() || undefined : undefined,
     spoiler_text: showCw.value ? spoilerText.value : '',
     visibility: selectedVisibility.value.value,
     language: selectedLanguage.value.code,
-    in_reply_to_id: props.replyTo?.id,
+    in_reply_to_id: props.replyTo?.id ?? compose.inReplyToId ?? undefined,
     quote_id: compose.quoteId ?? undefined,
     quote_policy: compose.quotePolicy,
     media_ids: compose.mediaAttachments.map(m => m.id),
+    draft_id: drafts.activeDraftId ?? undefined,
   })
   // Draft is NOT cleared here — publishing may still fail. The compose
   // store bumps publishedTick only on success (its reset() clears media
@@ -517,7 +914,11 @@ function submit() {
 }
 
 watch(() => compose.publishedTick, () => {
+  generatedArticleMediaMarkdown.clear()
   content.value = ''
+  objectType.value = 'Note'
+  articleTitle.value = ''
+  articleSummary.value = ''
   spoilerText.value = ''
   showCw.value = false
 })
@@ -540,10 +941,10 @@ watch(() => compose.publishedTick, () => {
 
     <div class="flex flex-wrap items-center gap-2 mb-3">
       <!-- Visibility selector -->
-      <Listbox v-model="selectedVisibility">
+      <Listbox v-model="selectedVisibility" :disabled="isEditing">
         <div class="relative">
           <ListboxButton
-            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
+            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-60 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
             :aria-label="t('compose.visibility.label')"
             :title="t('compose.visibility.label')"
           >
@@ -579,10 +980,10 @@ watch(() => compose.publishedTick, () => {
       </Listbox>
 
       <!-- Quote policy selector -->
-      <Listbox v-model="compose.quotePolicy">
+      <Listbox v-model="compose.quotePolicy" :disabled="isEditing">
         <div class="relative">
           <ListboxButton
-            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
+            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-60 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
             :aria-label="t('compose.quote_policy.label')"
             :title="t('compose.quote_policy.label')"
           >
@@ -618,10 +1019,10 @@ watch(() => compose.publishedTick, () => {
       </Listbox>
 
       <!-- Language selector -->
-      <Listbox v-model="selectedLanguage">
+      <Listbox v-model="selectedLanguage" :disabled="isEditing">
         <div class="relative">
           <ListboxButton
-            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
+            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-60 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
             :aria-label="t('compose.language')"
             :title="t('compose.language')"
           >
@@ -655,16 +1056,87 @@ watch(() => compose.publishedTick, () => {
           </ListboxOptions>
         </div>
       </Listbox>
+
+      <!-- Twitter-style drafts affordance, pinned to the right of the compose controls. -->
+      <button
+        v-if="!isEditing"
+        type="button"
+        data-testid="draft-menu-button"
+        class="ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-bold text-brand-600 transition-colors hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-brand-400 dark:hover:bg-brand-950/40"
+        :aria-expanded="showDraftMenu"
+        @click="showDraftMenu = true"
+      >
+        <span>{{ t('compose.drafts') }}</span>
+        <span v-if="drafts.count" class="min-w-5 rounded-full bg-brand-100 px-1.5 py-0.5 text-center text-[11px] leading-4 text-brand-700 dark:bg-brand-950 dark:text-brand-300">{{ drafts.count }}</span>
+      </button>
     </div>
+
+    <!-- Explicit post type selector: visible in every composer layout. -->
+    <fieldset class="mb-3 disabled:cursor-not-allowed disabled:opacity-60" :disabled="isEditing">
+      <legend class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {{ t('compose.post_type') }}
+      </legend>
+      <div class="grid grid-cols-2 gap-2" role="radiogroup" :aria-label="t('compose.post_type')">
+        <button
+          type="button"
+          role="radio"
+          :aria-checked="objectType === 'Note'"
+          :disabled="isEditing"
+          data-testid="compose-type-note"
+          class="rounded-xl border px-3 py-2.5 text-left transition"
+          :class="objectType === 'Note'
+            ? 'border-brand-500 bg-brand-50 text-brand-800 ring-2 ring-brand-500/20 dark:bg-brand-950/40 dark:text-brand-200'
+            : 'border-outline bg-surface text-slate-600 hover:border-brand-300 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-300'"
+          @click="selectObjectType('Note')"
+        >
+          <span class="block text-sm font-bold">{{ t('compose.note_type') }}</span>
+          <span class="mt-0.5 block text-xs opacity-75">{{ t('compose.note_type_description') }}</span>
+        </button>
+        <button
+          type="button"
+          role="radio"
+          :aria-checked="objectType === 'Article'"
+          :disabled="isEditing"
+          data-testid="compose-type-article"
+          class="rounded-xl border px-3 py-2.5 text-left transition"
+          :class="objectType === 'Article'
+            ? 'border-brand-500 bg-brand-50 text-brand-800 ring-2 ring-brand-500/20 dark:bg-brand-950/40 dark:text-brand-200'
+            : 'border-outline bg-surface text-slate-600 hover:border-brand-300 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-300'"
+          @click="selectObjectType('Article')"
+        >
+          <span class="block text-sm font-bold">{{ t('compose.article_type') }}</span>
+          <span class="mt-0.5 block text-xs opacity-75">{{ t('compose.article_type_description') }}</span>
+        </button>
+      </div>
+    </fieldset>
 
     <!-- Reply indicator -->
     <div v-if="replyTo" class="mb-2 text-sm text-slate-500 dark:text-slate-400">
       {{ t('compose.replying_to', { name: `@${replyTo.account.acct}` }) }}
     </div>
 
+    <div v-if="objectType === 'Article'" class="mb-2">
+      <input
+        v-model="articleTitle"
+        type="text"
+        maxlength="200"
+        :placeholder="t('compose.article_title_placeholder')"
+        class="w-full rounded-xl border border-outline bg-surface px-3.5 py-3 text-xl font-bold text-slate-950 transition placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-outline-dark dark:bg-surface-2-dark dark:text-white dark:placeholder:text-slate-500"
+      />
+      <div class="mt-1 text-right text-xs tabular-nums text-slate-400">{{ articleTitle.length }}/200</div>
+      <textarea
+        v-model="articleSummary"
+        rows="2"
+        maxlength="500"
+        :placeholder="t('compose.article_summary_placeholder')"
+        class="mt-2 w-full resize-none rounded-xl border border-outline bg-surface px-3.5 py-2.5 text-sm leading-relaxed text-slate-900 transition placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-100 dark:placeholder:text-slate-500"
+      />
+      <div class="mt-1 text-right text-xs tabular-nums text-slate-400">{{ articleSummary.length }}/500</div>
+    </div>
+
     <!-- CW input -->
     <input
-      v-if="showCw"
+      v-if="objectType !== 'Article' && showCw"
       v-model="spoilerText"
       type="text"
       :placeholder="t('compose.cw_placeholder')"
@@ -676,16 +1148,20 @@ watch(() => compose.publishedTick, () => {
       <textarea
         ref="textareaRef"
         v-model="content"
-        :placeholder="t('compose.placeholder')"
+        :placeholder="objectType === 'Article' ? t('compose.article_body_placeholder') : t('compose.placeholder')"
         rows="5"
         class="w-full resize-none rounded-xl border border-outline bg-surface px-3.5 py-3 text-base leading-relaxed text-slate-900 transition placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-100 dark:placeholder:text-slate-500"
         @paste="onPaste"
         @drop.prevent="onDrop"
         @dragover.prevent
-        :aria-label="t('compose.placeholder')"
+        :aria-label="objectType === 'Article' ? t('compose.article_body_placeholder') : t('compose.placeholder')"
         @input="onTextareaInput"
         @keydown="onTextareaKeydown"
       />
+
+      <div v-if="objectType === 'Article'" class="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+        {{ t('compose.article_markdown_help') }}
+      </div>
 
       <!-- Autocomplete dropdown -->
       <div
@@ -738,9 +1214,31 @@ watch(() => compose.publishedTick, () => {
           type="button"
           @click="openAltEditor(media)"
           class="absolute bottom-1 left-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wide backdrop-blur-sm transition-opacity"
-          :class="media.description ? 'bg-brand-600/90 text-white opacity-95' : 'bg-slate-950/60 text-white opacity-0 group-hover:opacity-100'"
+          :class="media.description_generation_status === 'pending'
+            ? 'bg-slate-950/75 text-white opacity-100'
+            : media.description_generation_status === 'failed'
+              ? 'bg-red-600/95 text-white opacity-100'
+            : media.description
+              ? 'bg-brand-600/90 text-white opacity-95'
+              : 'bg-slate-950/60 text-white opacity-0 group-hover:opacity-100'"
+          :aria-live="media.description_generation_status === 'pending' || media.description_generation_status === 'failed' ? 'polite' : undefined"
+          data-testid="media-alt-button"
         >
-          ALT
+          <span
+            v-if="media.description_generation_status === 'pending'"
+            class="inline-flex items-center gap-1"
+            data-testid="media-alt-generating"
+          >
+            <span class="h-2 w-2 animate-spin rounded-full border border-white/50 border-t-white" />
+            {{ t('compose.alt_generating') }}
+          </span>
+          <span
+            v-else-if="media.description_generation_status === 'failed'"
+            data-testid="media-alt-failed"
+          >
+            ! {{ t('compose.alt_generation_failed_short') }}
+          </span>
+          <template v-else>ALT</template>
         </button>
         <!-- Remove button -->
         <button
@@ -753,6 +1251,14 @@ watch(() => compose.publishedTick, () => {
         </button>
       </div>
     </div>
+
+    <p
+      v-if="compose.hasUnreviewedGeneratedAltText"
+      class="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400"
+      data-testid="generated-alt-notice"
+    >
+      {{ t('compose.alt_generated_notice') }}
+    </p>
 
     <!-- Quote preview -->
     <div
@@ -781,19 +1287,29 @@ watch(() => compose.publishedTick, () => {
     </div>
 
     <!-- ALT text editor modal -->
-    <div v-if="altEditMedia" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm" @click.self="altEditMedia = null">
-      <div class="sb-card mx-4 w-full max-w-md p-5">
+    <div v-if="altEditMedia" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm" @click.self="closeAltEditor">
+      <div class="sb-card mx-4 w-full max-w-md p-5" :aria-busy="altSaving">
         <div class="mb-3 flex items-center justify-between">
           <h3 class="sb-heading text-sm">{{ t('compose.alt_text') }}</h3>
-          <button type="button" @click="altEditMedia = null" class="rounded-lg p-1 text-slate-400 transition-colors hover:bg-surface-2 hover:text-slate-600 dark:hover:bg-white/10 dark:hover:text-slate-300">✕</button>
+          <button type="button" @click="closeAltEditor" :disabled="altSaving" data-testid="media-alt-close" class="rounded-lg p-1 text-slate-400 transition-colors hover:bg-surface-2 hover:text-slate-600 disabled:cursor-wait disabled:opacity-50 dark:hover:bg-white/10 dark:hover:text-slate-300">✕</button>
         </div>
         <img
           v-if="altEditMedia.type === 'image' || altEditMedia.type === 'gifv'"
           :src="altEditMedia.preview_url ?? altEditMedia.url"
           class="mb-3 h-40 w-full rounded-xl bg-surface-2 object-contain dark:bg-canvas-dark"
         />
+        <p
+          v-if="altEditMedia.description_generation_status === 'failed'"
+          class="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-300"
+          role="alert"
+          data-testid="media-alt-failure-message"
+        >
+          {{ altGenerationFailureMessage(altEditMedia) }}
+        </p>
         <textarea
           v-model="altEditText"
+          @input="onAltInput"
+          :disabled="altSaving"
           :placeholder="t('compose.alt_placeholder')"
           rows="3"
           class="sb-input resize-none"
@@ -804,7 +1320,8 @@ watch(() => compose.publishedTick, () => {
           <button
             type="button"
             @click="saveAlt"
-            class="sb-btn sb-btn-primary sb-btn-sm"
+            :disabled="altSaving"
+            class="sb-btn sb-btn-primary sb-btn-sm disabled:cursor-wait disabled:opacity-60"
           >
             {{ t('common.save') }}
           </button>
@@ -871,7 +1388,7 @@ watch(() => compose.publishedTick, () => {
     </div>
 
     <!-- Toolbar -->
-    <div class="mt-3 flex items-center justify-between border-t border-outline pt-3 dark:border-outline-dark">
+    <div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-outline pt-3 dark:border-outline-dark">
       <div class="flex items-center gap-1.5 flex-wrap">
         <!-- Media upload -->
         <button
@@ -887,6 +1404,7 @@ watch(() => compose.publishedTick, () => {
 
         <!-- CW toggle -->
         <button
+          v-if="objectType !== 'Article'"
           type="button"
           @click="showCw = !showCw"
           class="sb-btn sb-btn-ghost rounded-xl p-2"
@@ -901,6 +1419,7 @@ watch(() => compose.publishedTick, () => {
 
         <!-- Poll toggle -->
         <button
+          v-if="objectType !== 'Article'"
           type="button"
           @click="togglePoll"
           :disabled="compose.mediaAttachments.length > 0"
@@ -947,7 +1466,18 @@ watch(() => compose.publishedTick, () => {
         </span>
       </div>
 
-      <div class="flex items-center gap-3">
+      <div class="ml-auto flex items-center gap-2 sm:gap-3">
+        <button
+          v-if="!isEditing"
+          type="button"
+          data-testid="save-draft-button"
+          :disabled="!canSaveDraft"
+          class="sb-btn sb-btn-secondary"
+          @click="saveDraftNow"
+        >
+          {{ draftSaveLabel }}
+        </button>
+
         <!-- Char counter -->
         <span
           class="text-sm tabular-nums"
@@ -963,9 +1493,111 @@ watch(() => compose.publishedTick, () => {
           class="sb-btn sb-btn-primary"
         >
           <svg v-if="compose.publishing" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-          {{ t('compose.submit') }}
+          {{ isEditing ? t('status.edit') : t('compose.submit') }}
         </button>
       </div>
     </div>
   </form>
+
+  <Teleport to="body">
+    <TransitionRoot :show="showDraftMenu" as="template">
+      <Dialog class="relative z-[90]" @close="showDraftMenu = false">
+        <TransitionChild
+          as="template"
+          enter="ease-out duration-200"
+          enter-from="opacity-0"
+          enter-to="opacity-100"
+          leave="ease-in duration-150"
+          leave-from="opacity-100"
+          leave-to="opacity-0"
+        >
+          <div class="fixed inset-0 bg-slate-950/45 backdrop-blur-[1px]" />
+        </TransitionChild>
+
+        <div class="fixed inset-0 overflow-y-auto p-0 sm:p-4">
+          <div class="flex min-h-full items-start justify-center sm:items-center">
+            <TransitionChild
+              as="template"
+              enter="ease-out duration-200"
+              enter-from="translate-y-4 opacity-0 sm:translate-y-0 sm:scale-95"
+              enter-to="translate-y-0 opacity-100 sm:scale-100"
+              leave="ease-in duration-150"
+              leave-from="translate-y-0 opacity-100 sm:scale-100"
+              leave-to="translate-y-4 opacity-0 sm:translate-y-0 sm:scale-95"
+            >
+              <DialogPanel
+                data-testid="drafts-modal"
+                class="min-h-screen w-full overflow-hidden bg-surface text-slate-900 shadow-2xl sm:min-h-0 sm:max-w-xl sm:rounded-2xl dark:bg-surface-dark dark:text-slate-100"
+              >
+                <header class="flex h-14 items-center gap-3 border-b border-outline px-3 dark:border-outline-dark">
+                  <button
+                    type="button"
+                    class="grid h-9 w-9 place-items-center rounded-full transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:hover:bg-white/10"
+                    :aria-label="t('common.close')"
+                    @click="showDraftMenu = false"
+                  >
+                    <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path stroke-linecap="round" d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                  <div class="min-w-0 flex-1">
+                    <DialogTitle class="truncate text-xl font-extrabold">{{ t('compose.drafts') }}</DialogTitle>
+                    <p class="truncate text-xs text-slate-500 dark:text-slate-400">{{ t('compose.drafts_subtitle') }}</p>
+                  </div>
+                  <span v-if="drafts.count" class="text-sm font-medium tabular-nums text-slate-500 dark:text-slate-400">{{ drafts.count }}</span>
+                </header>
+
+                <div v-if="drafts.error" class="border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+                  {{ t('compose.draft_save_failed') }}
+                </div>
+
+                <div v-if="drafts.loading" class="flex items-center justify-center gap-2 px-4 py-12 text-sm text-slate-500 dark:text-slate-400">
+                  <svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  {{ t('compose.drafts_loading') }}
+                </div>
+
+                <p v-else-if="drafts.count === 0" class="px-6 py-16 text-center text-sm text-slate-500 dark:text-slate-400">
+                  {{ t('compose.no_drafts') }}
+                </p>
+
+                <ul v-else class="max-h-[calc(100vh-3.5rem)] divide-y divide-outline overflow-y-auto sm:max-h-[70vh] dark:divide-outline-dark">
+                  <li v-for="draft in drafts.drafts" :key="draft.id" class="group flex items-stretch transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.04]">
+                    <button type="button" class="min-w-0 flex-1 px-5 py-4 text-left" @click="loadDraft(draft.id)">
+                      <span class="mb-1 flex items-start gap-2">
+                        <span
+                          class="min-w-0 flex-1 text-[15px] text-slate-900 dark:text-white"
+                          :class="draft.objectType === 'Article' ? 'truncate font-bold' : 'line-clamp-2 whitespace-pre-wrap leading-5'"
+                        >
+                          {{ draft.objectType === 'Article' ? draftTitle(draft) : (draft.content.trim() || draftTitle(draft)) }}
+                        </span>
+                        <span class="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:bg-white/10 dark:text-slate-400">
+                          {{ draft.objectType === 'Article' ? t('compose.draft_article') : t('compose.draft_note') }}
+                        </span>
+                      </span>
+                      <span v-if="draft.objectType === 'Article' && draft.content.trim()" class="line-clamp-2 block whitespace-pre-wrap text-sm leading-5 text-slate-600 dark:text-slate-300">{{ draft.content.trim() }}</span>
+                      <span class="mt-2 flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
+                        <span>{{ formatDraftDate(draft.updatedAt) }}</span>
+                        <span v-if="draft.pendingSync">· {{ t('compose.draft_pending_sync') }}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      class="m-3 self-center rounded-full p-2.5 text-slate-400 opacity-70 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 group-hover:opacity-100 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                      :aria-label="t('compose.discard_draft')"
+                      :title="t('compose.discard_draft')"
+                      @click="removeDraft(draft.id)"
+                    >
+                      <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673A2.25 2.25 0 0115.916 21H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                      </svg>
+                    </button>
+                  </li>
+                </ul>
+              </DialogPanel>
+            </TransitionChild>
+          </div>
+        </div>
+      </Dialog>
+    </TransitionRoot>
+  </Teleport>
 </template>

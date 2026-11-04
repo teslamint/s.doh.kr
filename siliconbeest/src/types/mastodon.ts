@@ -91,6 +91,9 @@ export interface Status {
   id: string;
   uri: string;
   created_at: string;
+  object_type: 'Note' | 'Article' | 'Question';
+  title: string;
+  article_summary?: string;
   account: Account;
   content: string;
   visibility: StatusVisibility;
@@ -143,6 +146,18 @@ export interface MediaAttachment {
   remote_url: string | null;
   meta: Record<string, unknown> | null;
   description: string | null;
+  /** SiliconBeest extension for optional background Workers AI captions. */
+  description_generation_status?: 'pending' | 'complete' | 'failed' | 'disabled';
+  /** Stable failure category; internal provider errors are never exposed. */
+  description_generation_error?:
+    | 'rate_limited'
+    | 'rate_limiter_unavailable'
+    | 'generation_failed'
+    | 'persistence_failed'
+    | 'timeout'
+    | 'unknown'
+    | null;
+  description_generation_retry_after_seconds?: number | null;
   blurhash: string | null;
 }
 
@@ -294,6 +309,12 @@ export interface InstanceConfiguration {
   };
   translation: {
     enabled: boolean;
+  };
+  /** Optional Workers AI capabilities advertised by this instance. */
+  ai?: {
+    enabled: boolean;
+    recommended_timeline: boolean;
+    image_description: boolean;
   };
   turnstile?: {
     enabled: boolean;
